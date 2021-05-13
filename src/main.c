@@ -303,7 +303,7 @@ void main_loop() {
 
 		// --- Value bars
 
-		value_bar(&volume_bar, &state
+		value_bar(&volume_bar, &state);
 
 
 		update(&state);
