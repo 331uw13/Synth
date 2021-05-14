@@ -8,19 +8,13 @@
 #define BASEFREQ 110.0
 
 
-struct __osc {
-	u32    wave_type;
-	double hz;
-	double vol;
-};
-
 struct __synthdata {
 	
 	u32 sample_rate;
 	double time;
 	double previous_out;
 	double master_vol;
-	struct __osc o[SYNTH_NUM_OSC];
+	struct osc_t o[SYNTH_NUM_OSC];
 
 } synthdata;
 
@@ -73,7 +67,7 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 		double out = 0.0;
 		
 		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-			out += 0.5 * osc(i);
+			out += synthdata.o[i].vol * osc(i);
 		}
 
 		buf[i] = (short)(clip(out*synthdata.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
@@ -111,6 +105,10 @@ double synth_get_previous_out() {
 */
 double* synth_get_master_vol() {
 	return &synthdata.master_vol;
+}
+
+struct osc_t* synth_get_osc(u32 osc_num) {
+	return &synthdata.o[osc_num];
 }
 
 void synth_init() {

@@ -22,6 +22,11 @@ typedef unsigned char  u8;
 #define O_TRIANGLE 3
 #define O_NOISE    4
 
+struct osc_t {
+	u32    wave_type;
+	double hz;
+	double vol;
+};
 
 
 void synth_playkey(int key);
@@ -32,6 +37,7 @@ void synth_set_osc_type(u32 type, u32 osc_num);
 u32 synth_get_osc_type(u32 osc_num);
 //double synth_get_previous_out();
 double* synth_get_master_vol();
+struct osc_t* synth_get_osc(u32 osc_num);
 
 void synth_init();
 void synth_quit();

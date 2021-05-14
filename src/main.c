@@ -16,6 +16,8 @@
 #define BUTTON_X_SPACE  3
 #define BUTTON_Y_SPACE  3
 #define BUTTON_BORDER 5
+#define COLOR_DETAIL 10
+
 
 
 struct state_t {
@@ -42,6 +44,12 @@ struct value_bar_t {
 	double max;
 	double* value;
 	int mouse_y;
+};
+
+struct color_t {
+	u8 r;
+	u8 g;
+	u8 b;
 };
 
 
@@ -86,11 +94,62 @@ void update(struct state_t* state) {
 		synth_playkey(9);
 	}
 	else {
-		synth_set_hz(0.0, 0);
-		synth_set_hz(0.0, 1);
-		synth_set_hz(0.0, 2);
+		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+			synth_set_hz(0.0, i);
+		}
 	}
 }
+
+int clamp(int a, int min, int max) {
+	return (a <= min) ? min : (a >= max) ? max : a;
+}
+
+double lerp(double a, double min, double max) {
+	return (max-min)*a+min;
+}
+
+double normalize(double a, double min, double max) {
+	return (a-min)/(max-min);
+}
+
+double map_value(double a, double src_min, double src_max, double dest_min, double dest_max) {
+	return lerp(normalize(a, src_min, src_max), dest_min, dest_max);
+}
+
+double get_hue(double p, double q, double t) {
+	double c = 0;
+
+	//t = (t > 1.0) ? 1.0 : (t < 0.0) ? 0.0 : t;
+	printf("%f\n", t);
+
+	if(t < 1.0/6.0) { c = p+(q-p)*6.0*t; }
+	else if(t < 1.0/2.0) { c = q; }
+	else if(t < 2.0/3.0) { c = p+(q-p)*(2.0/3.0-t)*6.0; }
+
+	return c;
+}
+
+void get_color(int input, struct color_t* color_out) {
+
+	double h = 1.0;
+	double s = 0.5;
+	double l = 0.5;
+
+	double q = (l < 0.5) ? l*(1.0+s) : l+s-l*s;
+	double p = 2.0*l-q;
+
+	double r = get_hue(p, q, h+1.0/3.0);
+	double g = get_hue(p, q, h);
+	double b = get_hue(p, q, h-1.0/3.0);
+
+	printf("%f, %f, %f\n", p, q, h);
+
+	color_out->r = r;
+	color_out->g = g;
+	color_out->b = b;
+
+}
+
 
 void render_text(struct text_t* text) {
 	SDL_RenderCopy(sdlrenderer, text->texture, NULL, &text->rect);
@@ -111,21 +170,6 @@ void destroy_text(struct text_t* text) {
 	SDL_DestroyTexture(text->texture);
 }
 
-int clamp(int a, int min, int max) {
-	return (a <= min) ? min : (a >= max) ? max : a;
-}
-
-double lerp(double a, double min, double max) {
-	return (max-min)*a+min;
-}
-
-double normalize(double a, double min, double max) {
-	return (a-min)/(max-min);
-}
-
-double map_value(double a, double src_min, double src_max, double dest_min, double dest_max) {
-	return lerp(normalize(a, src_min, src_max), dest_min, dest_max);
-}
 
 u8 button(u32 x, u32 y, struct text_t* text, struct state_t* s) {
 
@@ -216,11 +260,33 @@ void main_loop() {
 	create_text(&wave_options[4], font, "NOISE",    0, 0);
 
 
-	double test_value = 0.0;
+	// Create colors.
+	struct color_t colors[COLOR_DETAIL];
+	for(int i = 0; i < COLOR_DETAIL; i++) {
+		get_color(i, &colors[i]);
+	}
+
+
+
 	struct value_bar_t volume_bar = { 
 		5, 5, VOLUME_BAR_WIDTH, state.wn_h-10,
-		0.0, SYNTH_MAX_VOL, synth_get_master_vol(), -1
+		0.0, SYNTH_MAX_VOL, 
+		synth_get_master_vol(),
+	   	-1
    	};
+
+	struct value_bar_t volume_bar_osc[SYNTH_NUM_OSC];
+	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+		struct value_bar_t b = { 
+			VOLUME_BAR_WIDTH+((i*2+1)*BUTTON_BORDER*BUTTON_X_OFFSET), 
+			(wave_options[0].rect.h+BUTTON_BORDER*BUTTON_Y_SPACE+10)*SYNTH_NUM_OSC, 
+			30, 150,
+			0.0, SYNTH_MAX_VOL,
+			&synth_get_osc(i)->vol,
+			-1
+		};
+		volume_bar_osc[i] = b;
+	}
 
 
 	double dt = 0.0;
@@ -229,7 +295,7 @@ void main_loop() {
 	const double min_dt = 20.0 / 1000.0;
 	const u32 num_wave_options = sizeof wave_options / sizeof *wave_options;
 
-	//synth_set_paused(1);
+	synth_set_paused(1);
 
 	SDL_Event event;
 	while(!(state.flags & SHOULDQUIT)) {
@@ -269,6 +335,16 @@ void main_loop() {
 		SDL_SetRenderDrawColor(sdlrenderer, 35, 25, 25, 255);
 		SDL_RenderClear(sdlrenderer);
 
+
+		// Testing colors. delete later.
+		for(u32 i = 0; i < 10; i++) {
+			SDL_Rect r = { 30+(VOLUME_BAR_WIDTH+5)*(i+1), 200, 30, 30 };
+			SDL_SetRenderDrawColor(sdlrenderer, colors[i].r, colors[i].g, colors[i].b, 255);
+			SDL_RenderFillRect(sdlrenderer, &r);
+		}
+
+
+
 		u32 x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
 		u32 y_off = BUTTON_BORDER*BUTTON_Y_OFFSET;
 
@@ -304,6 +380,11 @@ void main_loop() {
 		// --- Value bars
 
 		value_bar(&volume_bar, &state);
+		/*
+		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+			value_bar(&volume_bar_osc[i], &state);
+		}
+		*/
 
 
 		update(&state);
