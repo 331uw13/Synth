@@ -2,44 +2,42 @@
 
 #include "synth.h"
 
-#define MIN(a, b) (a <= b ? b : a)
-#define MAX(a, b) (a >= b ? b : a)
 #define W(a) (a*M_PI*2.0)
 #define BASEFREQ 110.0
 
 
-struct __synthdata {
-	
+// NOTE: maybe just pass pointer to 'program state' to all functions...
+struct __synth {
 	u32 sample_rate;
 	double time;
 	double previous_out;
 	double master_vol;
 	struct osc_t o[SYNTH_NUM_OSC];
 
-} synthdata;
+} synth;
 
 
 double osc(u32 i) {
-	u32 type = synthdata.o[i].wave_type;
-	double hz = synthdata.o[i].hz;
+	u32 type = synth.o[i].wave_type;
+	double hz = synth.o[i].hz;
 	double res = 0.0;
 	if(hz > 0.0) {
 		switch(type) {
 		
 			case O_SINE:
-				res = sin(W(hz)*synthdata.time);
+				res = sin(W(hz)*synth.time);
 				break;
 			
 			case O_SAW:
-				res = (2.0/M_PI)*(hz*M_PI*fmod(synthdata.time,1.0/hz)-(M_PI/2.0));
+				res = (2.0/M_PI)*(hz*M_PI*fmod(synth.time,1.0/hz)-(M_PI/2.0));
 				break;
 			
 			case O_SQUARE:
-				res = sin(W(hz)*synthdata.time) > 0.0 ? 1.0 : -1.0;
+				res = sin(W(hz)*synth.time) > 0.0 ? 1.0 : -1.0;
 				break;
 			
 			case O_TRIANGLE:
-				res = asin(sin(W(hz)*synthdata.time))*(2.0/M_PI);
+				res = asin(sin(W(hz)*synth.time))*(2.0/M_PI);
 				break;
 
 			case O_NOISE:
@@ -67,11 +65,11 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 		double out = 0.0;
 		
 		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-			out += synthdata.o[i].vol * osc(i);
+			out += synth.o[i].vol * osc(i);
 		}
 
-		buf[i] = (short)(clip(out*synthdata.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
-		synthdata.time += (1.0/(double)synthdata.sample_rate);
+		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
+		synth.time += (1.0/(double)synth.sample_rate);
 	}
 }
 
@@ -79,7 +77,7 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 void synth_playkey(int key) {
 	double hz = BASEFREQ*pow(pow(2.0,1.0/12.0),key);
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		synthdata.o[i].hz = hz;
+		synth.o[i].hz = hz;
 	}
 }
 
@@ -88,27 +86,27 @@ void synth_set_paused(u8 b) {
 }
 
 void synth_set_hz(double hz, u32 osc_num) {
-	synthdata.o[osc_num].hz = hz;
+	synth.o[osc_num].hz = hz;
 }
 
 void synth_set_osc_type(u32 type, u32 osc_num) {
-	synthdata.o[osc_num].wave_type = type;
+	synth.o[osc_num].wave_type = type;
 }
 
 u32 synth_get_osc_type(u32 osc_num) {
-	return synthdata.o[osc_num].wave_type;
+	return synth.o[osc_num].wave_type;
 }
 /*
 double synth_get_previous_out() {
-	return synthdata.previous_out;
+	return synth.previous_out;
 }
 */
 double* synth_get_master_vol() {
-	return &synthdata.master_vol;
+	return &synth.master_vol;
 }
 
 struct osc_t* synth_get_osc(u32 osc_num) {
-	return &synthdata.o[osc_num];
+	return &synth.o[osc_num];
 }
 
 void synth_init() {
@@ -125,14 +123,14 @@ void synth_init() {
 		fprintf(stderr, "SDL_OpenAudio() failed! %s\n", SDL_GetError());
 	}
 	
-	synthdata.time       = 0.0;
-	synthdata.master_vol   = 0.5;
-	synthdata.sample_rate  = asgot.freq;
+	synth.time       = 0.0;
+	synth.master_vol   = 0.5;
+	synth.sample_rate  = asgot.freq;
 
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		synthdata.o[i].wave_type = O_SQUARE;
-		synthdata.o[i].hz  = 0.0;
-		synthdata.o[i].vol = 0.5;
+		synth.o[i].wave_type = O_SQUARE;
+		synth.o[i].hz  = 0.0;
+		synth.o[i].vol = 0.5;
 	}
 	
 	synth_set_paused(0);

@@ -8,9 +8,7 @@
 #include <math.h>
 #include <SDL2/SDL_audio.h>
 
-typedef unsigned int   u32;
-typedef unsigned short u16;
-typedef unsigned char  u8;
+#include "typedefs.h"
 
 
 #define SYNTH_NUM_OSC 3
@@ -21,6 +19,9 @@ typedef unsigned char  u8;
 #define O_SQUARE   2
 #define O_TRIANGLE 3
 #define O_NOISE    4
+
+#define MIN(a, b) (a <= b ? b : a)
+#define MAX(a, b) (a >= b ? b : a)
 
 struct osc_t {
 	u32    wave_type;

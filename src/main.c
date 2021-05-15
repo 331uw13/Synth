@@ -6,28 +6,48 @@
 
 
 #define FONT_FILE "Topaz-8.ttf"
-#define WINDOW_REQWIDTH 1000
+#define WINDOW_REQWIDTH  1100
 #define WINDOW_REQHEIGHT 500
-#define SHOULDQUIT (1<<0)
-
-#define VOLUME_BAR_WIDTH 30
+#define VOLUME_BAR_WIDTH 40
 #define BUTTON_X_OFFSET 5
 #define BUTTON_Y_OFFSET 2
 #define BUTTON_X_SPACE  3
 #define BUTTON_Y_SPACE  3
 #define BUTTON_BORDER 5
 #define COLOR_DETAIL 10
+#define COLOR_OFFSET 3
+
+#define BG_R 40
+#define BG_G 32
+#define BG_B 30
+
+#define BAR_R 62
+#define BAR_G 45
+#define BAR_B 35
+
+#define BTN_R 92
+#define BTN_G 65
+#define BTN_B 35
 
 
+// TODO: Optimize text rendering and other stuff when everything else is done.
+
+
+static const u8 keyboard_layout[26] = {
+	16, 22, 17, 19, 24, 20, 8, 14, 15,
+	0, 18, 3, 5, 6, 7, 9, 10, 11, 25,
+	23, 2, 21, 1, 13, 12
+};
 
 struct state_t {
 	int flags;
-	u32 mouse_x;
-	u32 mouse_y;
-	int mouse_button;
-	int mouse_wheel;
-	int wn_w;    // Window width
-	int wn_h;    // Window height
+	u8 keys_down[26];
+	int mouse_x;
+	int mouse_y;
+	int mouse_button;  // 1 if any mouse key is pressed.
+	int mouse_wheel;   // Negative value when mouse wheel is scrolled down, positive if up else zero.
+	int wn_w;      // Window width.
+	int wn_h;      // Window height.
 };
 
 struct text_t {
@@ -35,15 +55,12 @@ struct text_t {
 	SDL_Rect rect;
 };
 
-struct value_bar_t {
-	u32 x;
-	u32 y;
-	u32 w;
-	u32 h;
+struct valuebar_t {
+	SDL_Rect rect;
 	double min;
 	double max;
-	double* value;
-	int mouse_y;
+	double* ptr;
+	int grab_pos;
 };
 
 struct color_t {
@@ -51,6 +68,9 @@ struct color_t {
 	u8 g;
 	u8 b;
 };
+
+
+#define SHOULDQUIT (1<<0)
 
 
 static SDL_Window* sdlwindow;
@@ -62,36 +82,37 @@ void update(struct state_t* state) {
 
 
 	// Uhh....
-
+	// TODO: make this better.
+	
 	if(keys[SDL_SCANCODE_A]) {
 		synth_playkey(0);
 	}
 	else if(keys[SDL_SCANCODE_S]) {
-		synth_playkey(1);
-	}
-	else if(keys[SDL_SCANCODE_D]) {
 		synth_playkey(2);
-	}
-	else if(keys[SDL_SCANCODE_F]) {
-		synth_playkey(3);
 	}
 	else if(keys[SDL_SCANCODE_D]) {
 		synth_playkey(4);
 	}
-	else if(keys[SDL_SCANCODE_G]) {
+	else if(keys[SDL_SCANCODE_F]) {
 		synth_playkey(5);
 	}
-	else if(keys[SDL_SCANCODE_H]) {
-		synth_playkey(6);
-	}
-	else if(keys[SDL_SCANCODE_J]) {
+	else if(keys[SDL_SCANCODE_D]) {
 		synth_playkey(7);
 	}
+	else if(keys[SDL_SCANCODE_G]) {
+		synth_playkey(9);
+	}
+	else if(keys[SDL_SCANCODE_H]) {
+		synth_playkey(10);
+	}
+	else if(keys[SDL_SCANCODE_J]) {
+		synth_playkey(12);
+	}
 	else if(keys[SDL_SCANCODE_K]) {
-		synth_playkey(8);
+		synth_playkey(14);
 	}
 	else if(keys[SDL_SCANCODE_L]) {
-		synth_playkey(9);
+		synth_playkey(15);
 	}
 	else {
 		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
@@ -101,7 +122,7 @@ void update(struct state_t* state) {
 }
 
 int clamp(int a, int min, int max) {
-	return (a <= min) ? min : (a >= max) ? max : a;
+	return ((a <= min) ? min : (a >= max) ? max : a);
 }
 
 double lerp(double a, double min, double max) {
@@ -117,46 +138,39 @@ double map_value(double a, double src_min, double src_max, double dest_min, doub
 }
 
 double get_hue(double p, double q, double t) {
-	double c = 0;
-
-	//t = (t > 1.0) ? 1.0 : (t < 0.0) ? 0.0 : t;
-	printf("%f\n", t);
-
-	if(t < 1.0/6.0) { c = p+(q-p)*6.0*t; }
-	else if(t < 1.0/2.0) { c = q; }
-	else if(t < 2.0/3.0) { c = p+(q-p)*(2.0/3.0-t)*6.0; }
-
-	return c;
+	t += (t < 0.0 || t > 1.0) ? -t*0.5 : 0.0;
+	return (t < 0.15) ? p+(q-p)*6.0*t : (t < 0.5) ? q : p+(q-p)*(0.7-t)*6.0;
 }
 
-void get_color(int input, struct color_t* color_out) {
-
-	double h = 1.0;
-	double s = 0.5;
-	double l = 0.5;
+void create_color(int input, struct color_t* color_out) {
+	double step = ((double)input*COLOR_OFFSET)/((double)COLOR_DETAIL);
+	double h = step;  // Hue
+	double s = 0.35;  // Saturation
+	double l = 0.5;   // Lightness
 
 	double q = (l < 0.5) ? l*(1.0+s) : l+s-l*s;
 	double p = 2.0*l-q;
 
-	double r = get_hue(p, q, h+1.0/3.0);
-	double g = get_hue(p, q, h);
-	double b = get_hue(p, q, h-1.0/3.0);
-
-	printf("%f, %f, %f\n", p, q, h);
-
-	color_out->r = r;
-	color_out->g = g;
-	color_out->b = b;
-
+	int r = round(get_hue(p, q, h+0.35) * 255.0);
+	int g = round(get_hue(p, q, h)      * 255.0);
+	int b = round(get_hue(p, q, h-0.35) * 255.0);
+	color_out->r = clamp(r, 0, 255);
+	color_out->g = clamp(g, 0, 255);
+	color_out->b = clamp(b, 0, 255);
 }
 
+// illuminate color
+// can be used to dim color if n is negative value.
+int illum(int v, int n) {
+	return clamp(v+n, 0, 255);
+}
 
 void render_text(struct text_t* text) {
 	SDL_RenderCopy(sdlrenderer, text->texture, NULL, &text->rect);
 }
 
 void create_text(struct text_t* text, TTF_Font* font, char* str, int x, int y) {
-	SDL_Color col = { 230,220,220,255 };
+	SDL_Color col = { 245, 225, 200, 255 };
 	SDL_Surface* surface = TTF_RenderText_Solid(font, str, col);
 	text->texture = SDL_CreateTextureFromSurface(sdlrenderer, surface);
 	SDL_FreeSurface(surface);
@@ -170,75 +184,109 @@ void destroy_text(struct text_t* text) {
 	SDL_DestroyTexture(text->texture);
 }
 
-
 u8 button(u32 x, u32 y, struct text_t* text, struct state_t* s) {
-
-	text->rect.x = x;
-	text->rect.y = y;
-	u32 rx = x - BUTTON_BORDER;
-	u32 ry = y - BUTTON_BORDER;
-	u32 rw = text->rect.w + BUTTON_BORDER*2;
-	u32 rh = text->rect.h + BUTTON_BORDER*2;
+	text->rect.x = x + BUTTON_BORDER;
+	text->rect.y = y + BUTTON_BORDER;
+	int rx = x;
+	int ry = y;
+	int rw = text->rect.w + BUTTON_BORDER*2;
+	int rh = text->rect.h + BUTTON_BORDER*2;
 
 	SDL_Rect r = { rx, ry, rw, rh };
 	u8 hover = (s->mouse_x >= rx && s->mouse_y >= ry && s->mouse_x <= rx+rw && s->mouse_y <= ry+rh);
 	
-	SDL_SetRenderDrawColor(sdlrenderer, hover ? 140 : 80, 45, 30, 255);
+	SDL_SetRenderDrawColor(sdlrenderer, BTN_R, BTN_G, BTN_B, 255);
 	SDL_RenderFillRect(sdlrenderer, &r);
 	render_text(text);
 
 	return s->mouse_button && hover;
 }
 
-u8 value_bar(struct value_bar_t* bar, struct state_t* s) {
-
-	SDL_Rect bg = { bar->x, bar->y, bar->w, bar->h };
+u8 valuebar(struct valuebar_t* bar, struct state_t* s, struct color_t* col) {
 	u8 changed = 0;
-	u8 hover = (s->mouse_x >= bar->x && s->mouse_y >= bar->y 
-			&& s->mouse_x <= bar->x+bar->w && s->mouse_y <= bar->y+bar->h);
+	u8 hover = (s->mouse_x >= bar->rect.x && s->mouse_y >= bar->rect.y 
+			&& s->mouse_x <= bar->rect.x + bar->rect.w && s->mouse_y <= bar->rect.y + bar->rect.h);
+
+	int y = bar->rect.y;
+	int h = bar->rect.h;
+	int m = s->mouse_y;
+	int wheel = s->mouse_wheel;
+
+	const u8 horizontal = (bar->rect.w > bar->rect.h);
+	double new_value = 0.0;
+	
+	if(horizontal) {
+		y = bar->rect.x;
+		h = bar->rect.w;
+		m = s->mouse_x;
+		wheel = -s->mouse_wheel;
+	}
 
 	if(hover) {
-		bar->mouse_y = clamp(s->mouse_button ? s->mouse_y : (u32)(bar->mouse_y - s->mouse_wheel), bar->y, bar->y+bar->h);
-		double new_value = map_value(bar->mouse_y, bar->y, bar->y+bar->h, bar->max, bar->min);
-		changed = (*bar->value != new_value);
-		*bar->value = new_value;
+		bar->grab_pos = clamp(s->mouse_button ? m : (bar->grab_pos - wheel), y, y+h);
+		new_value = map_value(bar->grab_pos, y, y+h, 
+				horizontal ? bar->min : bar->max, horizontal ? bar->max : bar->min);
+		changed = (*bar->ptr != new_value);
+		*bar->ptr = new_value;
 	}
-	else if(bar->mouse_y < 0) {
-		bar->mouse_y = map_value(*bar->value, bar->min, bar->max, bar->y+bar->h, bar->y);
+	else {
+		bar->grab_pos = map_value(*bar->ptr, 
+				horizontal ? bar->max : bar->min, horizontal ? bar->min : bar->max, y+h, y);
 	}
 
-	SDL_Rect fg = {
-		bar->x,
-		bar->mouse_y + 2,
-	   	bar->w,
-	   	bar->h - (bar->mouse_y - bar->y)
-	};
+	SDL_Rect fg;
+	SDL_Rect grab_point;
 	
-	SDL_Rect drag = {
-		bar->x,
-		bar->mouse_y,
-	   	bar->w,
-		4
-	};
+	if(horizontal) {
 
-	SDL_SetRenderDrawColor(sdlrenderer, 75, 55, 40, 255);
-	SDL_RenderFillRect(sdlrenderer, &bg);
+		fg.x = bar->rect.x;
+		fg.y = bar->rect.y;
+		fg.w = bar->grab_pos - bar->rect.x;
+		fg.h = bar->rect.h;
 
-	double t = normalize(*bar->value, bar->min, bar->max);
-	u8 r = (u8)lerp(t, 30,  200);
-	u8 g = (u8)lerp(t, 200, 80);
-	u8 b = (u8)lerp(t, 30,  30);
+		grab_point.x = bar->grab_pos;
+		grab_point.y = bar->rect.y;
+		grab_point.w = 4;
+		grab_point.h = bar->rect.h;
+	}
+	else {
+		
+		fg.x = bar->rect.x;
+		fg.y = bar->grab_pos;
+		fg.w = bar->rect.w;
+		fg.h = bar->rect.y - bar->grab_pos + bar->rect.h;
 
-	SDL_SetRenderDrawColor(sdlrenderer, r, g, b, 255);
+		grab_point.x = bar->rect.x;
+		grab_point.y = bar->grab_pos;
+		grab_point.w = bar->rect.w;
+		grab_point.h = 4;
+	}
+
+
+	SDL_SetRenderDrawColor(sdlrenderer, BAR_R, BAR_G, BAR_B, 255);
+	SDL_RenderFillRect(sdlrenderer, &bar->rect);
+
+	SDL_SetRenderDrawColor(sdlrenderer, col->r, col->g, col->b, 255);
 	SDL_RenderFillRect(sdlrenderer, &fg);
 	
-	SDL_SetRenderDrawColor(sdlrenderer, r+50, g+50, b+50, 255);
-	SDL_RenderFillRect(sdlrenderer, &drag);
+	SDL_SetRenderDrawColor(sdlrenderer, illum(col->r, 50), illum(col->g, 50), illum(col->b, 50), 255);
+	SDL_RenderFillRect(sdlrenderer, &grab_point);
 
 
 	return changed;
 }
 
+
+void create_valuebar(struct valuebar_t* bar, u32 x, u32 y, u32 w, u32 h, double* ptr, double min, double max) {
+	bar->rect.x = x;
+	bar->rect.y = y;
+	bar->rect.w = w;
+	bar->rect.h = h;
+	bar->ptr = ptr;
+	bar->min = min;
+	bar->max = max;
+	bar->grab_pos = -1;
+}
 
 
 void main_loop() {
@@ -249,7 +297,8 @@ void main_loop() {
 	SDL_GetWindowSize(sdlwindow, &state.wn_w, &state.wn_h);
 	TTF_Font* font = TTF_OpenFont(FONT_FILE, 16);
 	if(font == NULL) {
-		fprintf(stderr, "Failed to open ttf font: %s\n", SDL_GetError());
+		fprintf(stderr, "ERROR: %s\n", SDL_GetError());
+		return;
 	}
 
 	struct text_t wave_options[5];
@@ -260,42 +309,34 @@ void main_loop() {
 	create_text(&wave_options[4], font, "NOISE",    0, 0);
 
 
-	// Create colors.
-	struct color_t colors[COLOR_DETAIL];
-	for(int i = 0; i < COLOR_DETAIL; i++) {
-		get_color(i, &colors[i]);
-	}
-
-
-
-	struct value_bar_t volume_bar = { 
-		5, 5, VOLUME_BAR_WIDTH, state.wn_h-10,
-		0.0, SYNTH_MAX_VOL, 
-		synth_get_master_vol(),
-	   	-1
-   	};
-
-	struct value_bar_t volume_bar_osc[SYNTH_NUM_OSC];
+	struct color_t default_color = { 200, 80, 80 };
+	struct color_t colors[SYNTH_NUM_OSC];
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		struct value_bar_t b = { 
-			VOLUME_BAR_WIDTH+((i*2+1)*BUTTON_BORDER*BUTTON_X_OFFSET), 
-			(wave_options[0].rect.h+BUTTON_BORDER*BUTTON_Y_SPACE+10)*SYNTH_NUM_OSC, 
-			30, 150,
-			0.0, SYNTH_MAX_VOL,
-			&synth_get_osc(i)->vol,
-			-1
-		};
-		volume_bar_osc[i] = b;
+		create_color(i, &colors[i]);
 	}
 
+
+	struct valuebar_t volume_bar;
+	struct valuebar_t volume_bar_osc[SYNTH_NUM_OSC];
+	
+	create_valuebar(&volume_bar, 
+			5, 5, VOLUME_BAR_WIDTH, state.wn_h-10,
+		   	synth_get_master_vol(), 0.0, SYNTH_MAX_VOL);
+
+	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+		create_valuebar(&volume_bar_osc[i],
+				0, 0,
+				200, wave_options[0].rect.h+BUTTON_BORDER*2,
+				&synth_get_osc(i)->vol, 0.0, SYNTH_MAX_VOL);
+	}
 
 	double dt = 0.0;
 	double start_time = 0.0;
-	double last_time = 0.0;
 	const double min_dt = 20.0 / 1000.0;
 	const u32 num_wave_options = sizeof wave_options / sizeof *wave_options;
 
-	synth_set_paused(1);
+	//synth_set_paused(1);
+
 
 	SDL_Event event;
 	while(!(state.flags & SHOULDQUIT)) {
@@ -303,7 +344,6 @@ void main_loop() {
 		if(dt < min_dt) {
 			SDL_Delay((min_dt-dt)*1000.0);
 		}
-
 
 		while(SDL_PollEvent(&event)) {
 			switch(event.type) {
@@ -328,64 +368,62 @@ void main_loop() {
 					state.mouse_y = event.motion.y;
 					break;
 
+				case SDL_KEYDOWN:
+					break;
+
+				case SDL_KEYUP:
+					break;
+
 				default: break;
 			}
 		}
 
-		SDL_SetRenderDrawColor(sdlrenderer, 35, 25, 25, 255);
+		SDL_SetRenderDrawColor(sdlrenderer, BG_R, BG_G, BG_B, 255);
 		SDL_RenderClear(sdlrenderer);
 
 
-		// Testing colors. delete later.
-		for(u32 i = 0; i < 10; i++) {
-			SDL_Rect r = { 30+(VOLUME_BAR_WIDTH+5)*(i+1), 200, 30, 30 };
-			SDL_SetRenderDrawColor(sdlrenderer, colors[i].r, colors[i].g, colors[i].b, 255);
-			SDL_RenderFillRect(sdlrenderer, &r);
-		}
 
-
-
-		u32 x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
+		u32 x_off = 0;
 		u32 y_off = BUTTON_BORDER*BUTTON_Y_OFFSET;
 
 		// --- Wave options.
 
-		//render_text(&wave_options[0]);
-
 		for(u32 j = 0; j < SYNTH_NUM_OSC; j++) {
+			struct color_t* col = &colors[j];
+			x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
 			for(u32 i = 0; i < num_wave_options; i++) {
 				if(button(x_off, y_off, &wave_options[i], &state)) {
 					synth_set_osc_type(i, j);
 				}
-
 				if(i == synth_get_osc_type(j)) {
-					SDL_SetRenderDrawColor(sdlrenderer, 210, 85, 35, 255);
+					SDL_SetRenderDrawColor(sdlrenderer, col->r, col->g, col->b, 255);
 					SDL_Rect r = {
-						x_off-BUTTON_BORDER,
-						(y_off-5)+wave_options[i].rect.h+BUTTON_BORDER*2-3,
+						x_off,
+						y_off+wave_options[i].rect.h+BUTTON_Y_OFFSET*BUTTON_BORDER-3,
 						wave_options[i].rect.w+BUTTON_BORDER*2,
 						3
 					};
 					SDL_RenderFillRect(sdlrenderer, &r);
 				}
-
 				x_off += wave_options[i].rect.w+BUTTON_BORDER*BUTTON_X_SPACE;
 			}
-
-			x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
-			y_off += wave_options[0].rect.h + BUTTON_BORDER*BUTTON_Y_SPACE;
+			y_off += wave_options[0].rect.h+BUTTON_BORDER*BUTTON_Y_SPACE;
 		}
 
 
 		// --- Value bars
 
-		value_bar(&volume_bar, &state);
-		/*
+		valuebar(&volume_bar, &state, &default_color);
+		
 		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-			value_bar(&volume_bar_osc[i], &state);
-		}
-		*/
+			struct valuebar_t* bar = &volume_bar_osc[i];
 
+			bar->rect.x = x_off+BUTTON_X_OFFSET+30;
+			bar->rect.y = BUTTON_Y_OFFSET*BUTTON_BORDER+i*(bar->rect.h+BUTTON_BORDER*BUTTON_Y_SPACE-BUTTON_BORDER*2);
+
+			valuebar(bar, &state, &colors[i]);
+		}
+		
 
 		update(&state);
 		SDL_RenderPresent(sdlrenderer);
@@ -417,12 +455,12 @@ int main() {
 	sdlrenderer = NULL;
 
 	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-		fprintf(stderr, "Failed to initialize SDL2! %s\n", SDL_GetError());
+		fprintf(stderr, "ERROR: Failed to initialize SDL2! %s\n", SDL_GetError());
 		return -1;
 	}
 
 	if(TTF_Init() < 0) {
-		fprintf(stderr, "failed to initialize SDL2_ttf! %s\n", SDL_GetError());
+		fprintf(stderr, "ERROR: failed to initialize SDL2_ttf! %s\n", SDL_GetError());
 		SDL_Quit();
 		return -1;
 	}
@@ -434,7 +472,7 @@ int main() {
 
 	if(sdlwindow == NULL) {
 		SDL_Quit();
-		fprintf(stderr, "Failed to create window! %s\n", SDL_GetError());
+		fprintf(stderr, "ERROR: Failed to create window! %s\n", SDL_GetError());
 		return -1;
 	}
 
@@ -442,7 +480,7 @@ int main() {
 	if(sdlrenderer == NULL) {
 		SDL_DestroyWindow(sdlwindow);
 		SDL_Quit();
-		fprintf(stderr, "Failed to create renderer! %s\n", SDL_GetError());
+		fprintf(stderr, "ERROR: Failed to create renderer! %s\n", SDL_GetError());
 		return -1;
 	}
 
