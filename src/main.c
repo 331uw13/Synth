@@ -4,18 +4,33 @@
 
 #include "synth.h"
 
+// TODO: Optimize when everything else is done.
+
+
 
 #define FONT_FILE "Topaz-8.ttf"
 #define WINDOW_REQWIDTH  1100
 #define WINDOW_REQHEIGHT 500
 #define VOLUME_BAR_WIDTH 40
-#define BUTTON_X_OFFSET 5
-#define BUTTON_Y_OFFSET 2
-#define BUTTON_X_SPACE  3
-#define BUTTON_Y_SPACE  3
-#define BUTTON_BORDER 5
-#define COLOR_DETAIL 10
-#define COLOR_OFFSET 3
+#define BUTTON_X_OFFSET 3     // Offset from left
+#define BUTTON_Y_OFFSET 2     // Offset from up
+#define BUTTON_X_SPACE  5     // Space between buttons X axis if in group.
+#define BUTTON_Y_SPACE  5     // Space between buttons Y axis if in group.
+#define BUTTON_BORDER   10    // Button size.
+#define LINE_CUT_OFF 5
+
+#define ENVELOPE_BAR_WIDTH 150
+
+#define MAX_ATTACK 1.5
+#define MAX_DECAY 2.0
+#define MAX_RELEASE 1.5
+
+
+
+// By changing these values you can get different colors.
+#define COLOR_DETAIL 15
+#define COLOR_START  0
+#define COLOR_SKIP   2
 
 #define BG_R 40
 #define BG_G 32
@@ -30,14 +45,21 @@
 #define BTN_B 35
 
 
-// TODO: Optimize text rendering and other stuff when everything else is done.
 
 
-static const u8 keyboard_layout[26] = {
-	16, 22, 17, 19, 24, 20, 8, 14, 15,
-	0, 18, 3, 5, 6, 7, 9, 10, 11, 25,
-	23, 2, 21, 1, 13, 12
+static const int keyboard_layout[27] = {
+	10,23,21,12,2,13,14,15,7,16,17,18,25,
+	24,8,9,0,3,11,4,6,22,1,20,5,19
 };
+
+static const int PIANO_ORDER[27] = { 
+	0,1,0,1,0,1,0,1,0,1,0,  1,0,1,0,1,0,1,0,1,0,  1,0,1,0,1
+};
+
+
+static const SDL_Color TEXT_NORMAL_COLOR  = { 245, 225, 200, 255 };
+static const SDL_Color TEXT_OVERLAP_COLOR = { 230, 230, 230, 130 };
+
 
 struct state_t {
 	int flags;
@@ -70,56 +92,21 @@ struct color_t {
 };
 
 
-#define SHOULDQUIT (1<<0)
+#define BTN_XOFF        (BUTTON_BORDER+BUTTON_X_SPACE)
+#define BTN_YOFF        (BUTTON_BORDER+BUTTON_Y_SPACE)
+#define BTN_START_XOFF  (BUTTON_X_OFFSET+BUTTON_BORDER)
+#define BTN_START_YOFF  (BUTTON_Y_OFFSET+BUTTON_BORDER)
+#define TEXT_NORMAL    0
+#define TEXT_OVERLAY   1
+#define SHOULD_QUIT    1
+
+#define CLAMP(T, v, min, max)       ((T)(v < min ? min : v > max ? max : v))
+#define LOOP_CLAMP(T, v, min, max)  ((T)(v < min ? max : v > max ? min : v))
 
 
 static SDL_Window* sdlwindow;
 static SDL_Renderer* sdlrenderer;
 
-
-void update(struct state_t* state) {
-	const u8* keys = SDL_GetKeyboardState(0);
-
-
-	// Uhh....
-	// TODO: make this better.
-	
-	if(keys[SDL_SCANCODE_A]) {
-		synth_playkey(0);
-	}
-	else if(keys[SDL_SCANCODE_S]) {
-		synth_playkey(2);
-	}
-	else if(keys[SDL_SCANCODE_D]) {
-		synth_playkey(4);
-	}
-	else if(keys[SDL_SCANCODE_F]) {
-		synth_playkey(5);
-	}
-	else if(keys[SDL_SCANCODE_D]) {
-		synth_playkey(7);
-	}
-	else if(keys[SDL_SCANCODE_G]) {
-		synth_playkey(9);
-	}
-	else if(keys[SDL_SCANCODE_H]) {
-		synth_playkey(10);
-	}
-	else if(keys[SDL_SCANCODE_J]) {
-		synth_playkey(12);
-	}
-	else if(keys[SDL_SCANCODE_K]) {
-		synth_playkey(14);
-	}
-	else if(keys[SDL_SCANCODE_L]) {
-		synth_playkey(15);
-	}
-	else {
-		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-			synth_set_hz(0.0, i);
-		}
-	}
-}
 
 int clamp(int a, int min, int max) {
 	return ((a <= min) ? min : (a >= max) ? max : a);
@@ -143,8 +130,8 @@ double get_hue(double p, double q, double t) {
 }
 
 void create_color(int input, struct color_t* color_out) {
-	double step = ((double)input*COLOR_OFFSET)/((double)COLOR_DETAIL);
-	double h = step;  // Hue
+	double step = ((double)(input+COLOR_START)*COLOR_SKIP)/((double)COLOR_DETAIL);
+	double h = LOOP_CLAMP(double, step, 0.0, 1.0);  // Hue
 	double s = 0.35;  // Saturation
 	double l = 0.5;   // Lightness
 
@@ -159,42 +146,61 @@ void create_color(int input, struct color_t* color_out) {
 	color_out->b = clamp(b, 0, 255);
 }
 
-// illuminate color
-// can be used to dim color if n is negative value.
 int illum(int v, int n) {
 	return clamp(v+n, 0, 255);
+}
+
+u8 mouse_on_rect(struct state_t* s, SDL_Rect* r) {
+	return (s->mouse_x >= r->x && s->mouse_y >= r->y && s->mouse_x <= r->x+r->w && s->mouse_y <= r->y+r->h);
+}
+
+void set_rect_center(SDL_Rect* a, SDL_Rect* b) {
+	a->x = b->x+b->w/2-a->w/2;
+	a->y = b->y+b->h/2-a->h/2;
 }
 
 void render_text(struct text_t* text) {
 	SDL_RenderCopy(sdlrenderer, text->texture, NULL, &text->rect);
 }
 
-void create_text(struct text_t* text, TTF_Font* font, char* str, int x, int y) {
-	SDL_Color col = { 245, 225, 200, 255 };
-	SDL_Surface* surface = TTF_RenderText_Solid(font, str, col);
+void create_text(struct text_t* text, TTF_Font* font, char* str, int x, int y, int sx, int sy, SDL_Color color) {
+	SDL_Surface* surface = TTF_RenderText_Solid(font, str, color);
 	text->texture = SDL_CreateTextureFromSurface(sdlrenderer, surface);
 	SDL_FreeSurface(surface);
-
+	TTF_SizeText(font, str, &text->rect.w, &text->rect.h);
+	
 	text->rect.x = x;
 	text->rect.y = y;
-	TTF_SizeText(font, str, &text->rect.w, &text->rect.h);
+	text->rect.w += sx;
+	text->rect.h += sy;
 }
 
 void destroy_text(struct text_t* text) {
 	SDL_DestroyTexture(text->texture);
 }
 
-u8 button(u32 x, u32 y, struct text_t* text, struct state_t* s) {
-	text->rect.x = x + BUTTON_BORDER;
-	text->rect.y = y + BUTTON_BORDER;
-	int rx = x;
-	int ry = y;
-	int rw = text->rect.w + BUTTON_BORDER*2;
-	int rh = text->rect.h + BUTTON_BORDER*2;
+void draw_line(u32 x0, u32 y0, u32 x1, u32 y1, struct color_t* col) {
+	SDL_SetRenderDrawColor(sdlrenderer, col->r, col->g, col->b, 255);
+	SDL_RenderDrawLine(sdlrenderer, x0, y0, x1, y1);
+}
 
-	SDL_Rect r = { rx, ry, rw, rh };
-	u8 hover = (s->mouse_x >= rx && s->mouse_y >= ry && s->mouse_x <= rx+rw && s->mouse_y <= ry+rh);
-	
+void draw_rect(SDL_Rect* r, struct color_t* col, int l) {
+	if(l != 0) {
+		col->r += clamp(col->r+l, 0, 255);
+		col->g += clamp(col->g+l, 0, 255);
+		col->b += clamp(col->b+l, 0, 255);
+	}
+
+	SDL_SetRenderDrawColor(sdlrenderer, col->r, col->g, col->b, 255);
+	SDL_RenderFillRect(sdlrenderer, r);
+}
+
+u8 button(u32 x, u32 y, struct text_t* text, struct state_t* s) {
+	SDL_Rect r = { x, y, text->rect.w+BUTTON_BORDER, text->rect.h+BUTTON_BORDER };
+	u8 hover = mouse_on_rect(s, &r);
+
+	set_rect_center(&text->rect, &r);
+
 	SDL_SetRenderDrawColor(sdlrenderer, BTN_R, BTN_G, BTN_B, 255);
 	SDL_RenderFillRect(sdlrenderer, &r);
 	render_text(text);
@@ -204,8 +210,7 @@ u8 button(u32 x, u32 y, struct text_t* text, struct state_t* s) {
 
 u8 valuebar(struct valuebar_t* bar, struct state_t* s, struct color_t* col) {
 	u8 changed = 0;
-	u8 hover = (s->mouse_x >= bar->rect.x && s->mouse_y >= bar->rect.y 
-			&& s->mouse_x <= bar->rect.x + bar->rect.w && s->mouse_y <= bar->rect.y + bar->rect.h);
+	u8 hover = mouse_on_rect(s, &bar->rect);
 
 	int y = bar->rect.y;
 	int h = bar->rect.h;
@@ -229,39 +234,33 @@ u8 valuebar(struct valuebar_t* bar, struct state_t* s, struct color_t* col) {
 		changed = (*bar->ptr != new_value);
 		*bar->ptr = new_value;
 	}
-	else {
+	else if(bar->grab_pos < 0) {
 		bar->grab_pos = map_value(*bar->ptr, 
 				horizontal ? bar->max : bar->min, horizontal ? bar->min : bar->max, y+h, y);
 	}
 
 	SDL_Rect fg;
 	SDL_Rect grab_point;
+	fg.x = bar->rect.x;
 	
 	if(horizontal) {
-
-		fg.x = bar->rect.x;
 		fg.y = bar->rect.y;
 		fg.w = bar->grab_pos - bar->rect.x;
 		fg.h = bar->rect.h;
-
 		grab_point.x = bar->grab_pos;
 		grab_point.y = bar->rect.y;
 		grab_point.w = 4;
 		grab_point.h = bar->rect.h;
 	}
 	else {
-		
-		fg.x = bar->rect.x;
 		fg.y = bar->grab_pos;
 		fg.w = bar->rect.w;
 		fg.h = bar->rect.y - bar->grab_pos + bar->rect.h;
-
 		grab_point.x = bar->rect.x;
 		grab_point.y = bar->grab_pos;
 		grab_point.w = bar->rect.w;
 		grab_point.h = 4;
 	}
-
 
 	SDL_SetRenderDrawColor(sdlrenderer, BAR_R, BAR_G, BAR_B, 255);
 	SDL_RenderFillRect(sdlrenderer, &bar->rect);
@@ -271,7 +270,6 @@ u8 valuebar(struct valuebar_t* bar, struct state_t* s, struct color_t* col) {
 	
 	SDL_SetRenderDrawColor(sdlrenderer, illum(col->r, 50), illum(col->g, 50), illum(col->b, 50), 255);
 	SDL_RenderFillRect(sdlrenderer, &grab_point);
-
 
 	return changed;
 }
@@ -289,6 +287,15 @@ void create_valuebar(struct valuebar_t* bar, u32 x, u32 y, u32 w, u32 h, double*
 }
 
 
+#define TEXT_VOLUME  0
+#define TEXT_ATTACK  1
+#define TEXT_DECAY   2
+#define TEXT_SUSTAIN 3
+#define TEXT_RELEASE 4
+#define TEXT_NOTE_OFFSET   5
+// ...
+
+
 void main_loop() {
 	struct state_t state;
 	state.flags = 0;
@@ -301,15 +308,29 @@ void main_loop() {
 		return;
 	}
 
+	for(int i = 0; i < 26; i++) {
+		state.keys_down[i] = 0;
+	}
+
+	struct text_t volume_text;
+	struct text_t text_array[7];
 	struct text_t wave_options[5];
-	create_text(&wave_options[0], font, "SINE",     0, 0);
-	create_text(&wave_options[1], font, "SAW",      0, 0);
-	create_text(&wave_options[2], font, "SQUARE",   0, 0);
-	create_text(&wave_options[3], font, "TRIANGLE", 0, 0);
-	create_text(&wave_options[4], font, "NOISE",    0, 0);
+	create_text(&wave_options[0], font, "SINE",     0,0,0,0, TEXT_NORMAL_COLOR);
+	create_text(&wave_options[1], font, "SAW",      0,0,0,0, TEXT_NORMAL_COLOR);
+	create_text(&wave_options[2], font, "SQUARE",   0,0,0,0, TEXT_NORMAL_COLOR);
+	create_text(&wave_options[3], font, "TRIANGLE", 0,0,0,0, TEXT_NORMAL_COLOR);
+	create_text(&wave_options[4], font, "WHITE_NOISE",    0,0,0,0, TEXT_NORMAL_COLOR);
+	
+	create_text(&text_array[TEXT_VOLUME], font, "START_VOLUME", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_ATTACK], font, "ATTACK", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_DECAY],   font, "DECAY",   0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_SUSTAIN], font, "SUSTAIN", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_RELEASE], font, "RELEASE", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	
+	create_text(&text_array[TEXT_NOTE_OFFSET], font, "NOTE_OFFSET", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
 
 
-	struct color_t default_color = { 200, 80, 80 };
+	struct color_t default_color = { 200, 80, 85 };
 	struct color_t colors[SYNTH_NUM_OSC];
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 		create_color(i, &colors[i]);
@@ -318,37 +339,60 @@ void main_loop() {
 
 	struct valuebar_t volume_bar;
 	struct valuebar_t volume_bar_osc[SYNTH_NUM_OSC];
-	
+	struct valuebar_t envelope_bars[SYNTH_NUM_OSC*4];
+	struct valuebar_t effect_bars[SYNTH_NUM_OSC];
+
+
 	create_valuebar(&volume_bar, 
 			5, 5, VOLUME_BAR_WIDTH, state.wn_h-10,
 		   	synth_get_master_vol(), 0.0, SYNTH_MAX_VOL);
 
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		create_valuebar(&volume_bar_osc[i],
-				0, 0,
-				200, wave_options[0].rect.h+BUTTON_BORDER*2,
-				&synth_get_osc(i)->vol, 0.0, SYNTH_MAX_VOL);
+		create_valuebar(&volume_bar_osc[i], 0, 0, 200, wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_osc(i)->vol, 0.0, SYNTH_MAX_VOL);
+	
+		create_valuebar(&effect_bars[i], 0, 0, 200, wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_osc(i)->note_offset, -12.0, 12.0);
+		
+		create_valuebar(&envelope_bars[i], 0, 0, ENVELOPE_BAR_WIDTH,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_env(i)->attack, 0.0, MAX_ATTACK);
+		
+		create_valuebar(&envelope_bars[i+3], 0, 0, ENVELOPE_BAR_WIDTH,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_env(i)->decay, 0.0, MAX_DECAY);
+
+		create_valuebar(&envelope_bars[i+6], 0, 0, ENVELOPE_BAR_WIDTH,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_env(i)->sustain, 0.0, SYNTH_MAX_VOL);
+		
+		create_valuebar(&envelope_bars[i+9], 0, 0, ENVELOPE_BAR_WIDTH,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_env(i)->release, 0.0, MAX_RELEASE);
+	
 	}
 
 	double dt = 0.0;
 	double start_time = 0.0;
-	const double min_dt = 20.0 / 1000.0;
+	const double min_dt = 30.0 / 1000.0;
 	const u32 num_wave_options = sizeof wave_options / sizeof *wave_options;
 
 	//synth_set_paused(1);
+	*synth_get_master_vol() = 0.20;
 
 
 	SDL_Event event;
-	while(!(state.flags & SHOULDQUIT)) {
+	while(!(state.flags & SHOULD_QUIT)) {
 		start_time = SDL_GetPerformanceCounter();
 		if(dt < min_dt) {
 			SDL_Delay((min_dt-dt)*1000.0);
 		}
 
 		while(SDL_PollEvent(&event)) {
+			int k = 0;
 			switch(event.type) {
 				case SDL_QUIT:
-					state.flags |= SHOULDQUIT;
+					state.flags |= SHOULD_QUIT;
 					break;
 
 				case SDL_MOUSEWHEEL:
@@ -369,45 +413,129 @@ void main_loop() {
 					break;
 
 				case SDL_KEYDOWN:
+					if(event.key.keysym.sym > 0x60 && event.key.keysym.sym < 0x7B) {
+						k = keyboard_layout[event.key.keysym.sym-0x61];
+						synth_set_key_on(k);
+						state.keys_down[k] = 1;
+					}
 					break;
 
 				case SDL_KEYUP:
+					if(event.key.keysym.sym > 0x60 && event.key.keysym.sym < 0x7B) {
+						k = keyboard_layout[event.key.keysym.sym-0x61];
+						synth_set_key_off(k);
+						state.keys_down[k] = 0;
+					}
 					break;
 
 				default: break;
 			}
 		}
 
+
 		SDL_SetRenderDrawColor(sdlrenderer, BG_R, BG_G, BG_B, 255);
 		SDL_RenderClear(sdlrenderer);
 
-
-
 		u32 x_off = 0;
-		u32 y_off = BUTTON_BORDER*BUTTON_Y_OFFSET;
+		u32 y_off = 0;
+
+
+		// --- Draw piano
+		// NOTE: make this better later. For now its just for visualizing.
+
+		int black_off = 0;
+
+		int black_w = 20;
+		int black_h = 25;
+
+		int white_w = 25;
+		int white_h = 50;
+
+		int space = 3;
+
+
+		// White keys
+		for(int i = 0; i < 26; i++) {
+				
+			if(PIANO_ORDER[i]) {
+				black_off++;
+				continue;
+			}
+
+			SDL_Rect r;
+			struct color_t col;
+
+			col.r = 170;
+			col.g = 170;
+			col.b = 170;
+
+			r.x = VOLUME_BAR_WIDTH+15+black_off*(white_w+space);
+			r.y = state.wn_h-white_h-10;
+			r.w = white_w;
+			r.h = white_h;
+
+			draw_rect(&r, state.keys_down[i] ? &default_color : &col, 0);
+		}
+
+		black_off = 0;
+
+
+		// Black keys
+		for(int i = 0; i < 26; i++) {
+			
+			if(!PIANO_ORDER[i]) {
+				black_off++;
+				continue;
+			}
+
+			SDL_Rect r;
+			struct color_t col;
+
+			
+			col.r = 20;
+			col.g = 20;
+			col.b = 20;
+
+			r.x = VOLUME_BAR_WIDTH+30+(black_off-1)*(white_w+space);
+			r.y = state.wn_h - white_h - 10;
+			r.w = black_w;
+			r.h = black_h;
+
+			draw_rect(&r, state.keys_down[i] ? &default_color : &col, 0);
+		}
+
+
+		x_off = 0;
+		y_off = BTN_START_YOFF;
+
 
 		// --- Wave options.
 
 		for(u32 j = 0; j < SYNTH_NUM_OSC; j++) {
 			struct color_t* col = &colors[j];
 			x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
+
 			for(u32 i = 0; i < num_wave_options; i++) {
+				const SDL_Rect* rect = &wave_options[i].rect;
+
 				if(button(x_off, y_off, &wave_options[i], &state)) {
-					synth_set_osc_type(i, j);
+					synth_osc(j)->wave_type = i;
 				}
-				if(i == synth_get_osc_type(j)) {
+				
+				if(i == synth_osc(j)->wave_type) {
 					SDL_SetRenderDrawColor(sdlrenderer, col->r, col->g, col->b, 255);
 					SDL_Rect r = {
 						x_off,
-						y_off+wave_options[i].rect.h+BUTTON_Y_OFFSET*BUTTON_BORDER-3,
-						wave_options[i].rect.w+BUTTON_BORDER*2,
+						y_off + rect->h+BUTTON_BORDER-3,
+						rect->w + BUTTON_BORDER,
 						3
 					};
 					SDL_RenderFillRect(sdlrenderer, &r);
 				}
-				x_off += wave_options[i].rect.w+BUTTON_BORDER*BUTTON_X_SPACE;
+				
+				x_off += rect->w + BTN_XOFF;
 			}
-			y_off += wave_options[0].rect.h+BUTTON_BORDER*BUTTON_Y_SPACE;
+			y_off += wave_options[0].rect.h + BTN_YOFF;
 		}
 
 
@@ -417,15 +545,45 @@ void main_loop() {
 		
 		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 			struct valuebar_t* bar = &volume_bar_osc[i];
-
 			bar->rect.x = x_off+BUTTON_X_OFFSET+30;
-			bar->rect.y = BUTTON_Y_OFFSET*BUTTON_BORDER+i*(bar->rect.h+BUTTON_BORDER*BUTTON_Y_SPACE-BUTTON_BORDER*2);
-
+			bar->rect.y = BTN_START_YOFF+i*(bar->rect.h+BUTTON_Y_SPACE);
 			valuebar(bar, &state, &colors[i]);
-		}
+			set_rect_center(&text_array[TEXT_VOLUME].rect, &bar->rect);
+			render_text(&text_array[TEXT_VOLUME]);
+			int dest_y = bar->rect.y+bar->rect.h/2;
+			draw_line((x_off-BUTTON_X_OFFSET/2)+LINE_CUT_OFF, dest_y, bar->rect.x-LINE_CUT_OFF*2, dest_y, &colors[i]);
 		
 
-		update(&state);
+			bar = &effect_bars[i];
+			bar->rect.x = x_off+BUTTON_X_OFFSET+30 + bar->rect.w+30;
+			bar->rect.y = BTN_START_YOFF+i*(bar->rect.h+BUTTON_Y_SPACE);
+			valuebar(bar, &state, &colors[i]);
+			set_rect_center(&text_array[TEXT_NOTE_OFFSET].rect, &bar->rect);
+			render_text(&text_array[TEXT_NOTE_OFFSET]);
+			
+		}
+		
+		
+		x_off = VOLUME_BAR_WIDTH+BUTTON_BORDER*BUTTON_X_OFFSET;
+
+		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+			for(int j = 0; j < 4; j++) {
+				struct valuebar_t* bar = &envelope_bars[i+(j*3)];	
+				bar->rect.x = x_off+30+(bar->rect.w+35)*j;
+				bar->rect.y = BTN_START_YOFF+20+(i+SYNTH_NUM_OSC)*(bar->rect.h+BUTTON_Y_SPACE);
+				valuebar(bar, &state, &colors[i]);
+				set_rect_center(&text_array[TEXT_ATTACK+j].rect, &bar->rect);
+				render_text(&text_array[TEXT_ATTACK+j]);
+			
+				if(j < 3) {
+					int dest_y = bar->rect.y+bar->rect.h/2;
+					draw_line(bar->rect.x+bar->rect.w+LINE_CUT_OFF+BUTTON_X_OFFSET, dest_y,
+							bar->rect.x+bar->rect.w+35-LINE_CUT_OFF*2, dest_y, &colors[i]);
+				}
+			}
+		}
+	
+
 		SDL_RenderPresent(sdlrenderer);
 		state.mouse_wheel = 0;
 

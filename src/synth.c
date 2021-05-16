@@ -3,8 +3,16 @@
 #include "synth.h"
 
 #define W(a) (a*M_PI*2.0)
-#define BASEFREQ 110.0
+#define BASE_FREQ 130.0
 
+
+
+struct note_t {
+	u8 playing;
+	u8 used;
+	double on_tp;
+	double off_tp;
+};
 
 // NOTE: maybe just pass pointer to 'program state' to all functions...
 struct __synth {
@@ -13,15 +21,16 @@ struct __synth {
 	double previous_out;
 	double master_vol;
 	struct osc_t o[SYNTH_NUM_OSC];
-
+	struct env_t e[SYNTH_NUM_OSC];
+	struct note_t notes[26];
 } synth;
 
 
-double osc(u32 i) {
+double oscillate(u32 i, double hz) {
 	u32 type = synth.o[i].wave_type;
-	double hz = synth.o[i].hz;
 	double res = 0.0;
-	if(hz > 0.0) {
+
+	if(hz != 0.0) {
 		switch(type) {
 		
 			case O_SINE:
@@ -53,60 +62,103 @@ double osc(u32 i) {
 	return res;
 }
 
+double get_key_hz(int key) {
+	return BASE_FREQ*pow(pow(2.0, 1.0/12.0), key);
+}
+
 double clip(double a, double max) {
 	return (a >= 0.0) ? fmin(a, max) : fmax(a, -max);
 }
 
-void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
+double get_env_amp(struct env_t* e, struct note_t* note, double time, double amp) {
+	double a = 0.0;
 
+	if(note->used) {
+		double elapsed = time - note->on_tp;
+		
+		if(elapsed <= e->attack) {
+			a = (elapsed/e->attack)*amp;
+		}
+		if(elapsed > e->attack && elapsed <= (e->attack+e->decay)) {
+			a = ((elapsed - e->attack)/e->decay)*(e->sustain-amp)+amp;
+		}
+		if(elapsed > (e->attack+e->decay)) {
+			a = e->sustain;
+		}
+	}
+	else {
+		a = ((time - note->off_tp)/e->release)*(-e->sustain)+e->sustain;
+	}
+
+	if(a <= 0.0001 || a == 0.0) {
+		a = 0.0;
+	}
+
+	return a;
+}
+
+void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 	short* buf = (short*)stream;
 	const int buflen = bytes / sizeof *buf;
+
 	for(int i = 0; i < buflen; i++) {
 		double out = 0.0;
-		
-		for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-			out += synth.o[i].vol * osc(i);
+		for(int i = 0; i < 26; i++) {
+			struct note_t* note = &synth.notes[i];
+			double note_amp = 0.0;
+			if(note->playing) {
+				for(int j = 0; j < SYNTH_NUM_OSC; j++) {
+					struct osc_t* o = &synth.o[j];
+					double amp = get_env_amp(&synth.e[j], note, synth.time, o->vol);
+					out += (oscillate(j, get_key_hz(round(i+o->note_offset)))*amp)*o->vol;
+					note_amp += amp;
+				}
+			}
+
+			if(note_amp <= 0.0 && !note->used) {
+				note->playing = 0;
+			}
 		}
 
 		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
-		synth.time += (1.0/(double)synth.sample_rate);
+		synth.time += 1.0/((double)synth.sample_rate);
 	}
 }
 
 
-void synth_playkey(int key) {
-	double hz = BASEFREQ*pow(pow(2.0,1.0/12.0),key);
-	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		synth.o[i].hz = hz;
+void synth_set_key_on(u32 key) {
+	struct note_t* note = &synth.notes[key];
+
+	if(note->off_tp >= note->on_tp)  {
+		note->on_tp = synth.time;
+		note->playing = 1;
+		note->used = 1;
 	}
 }
+
+
+void synth_set_key_off(u32 key) {
+	struct note_t* note = &synth.notes[key];
+
+	note->off_tp = synth.time;
+	note->used = 0;
+}
+
 
 void synth_set_paused(u8 b) {
 	SDL_PauseAudio(b);
 }
 
-void synth_set_hz(double hz, u32 osc_num) {
-	synth.o[osc_num].hz = hz;
-}
-
-void synth_set_osc_type(u32 type, u32 osc_num) {
-	synth.o[osc_num].wave_type = type;
-}
-
-u32 synth_get_osc_type(u32 osc_num) {
-	return synth.o[osc_num].wave_type;
-}
-/*
-double synth_get_previous_out() {
-	return synth.previous_out;
-}
-*/
 double* synth_get_master_vol() {
 	return &synth.master_vol;
 }
 
-struct osc_t* synth_get_osc(u32 osc_num) {
+struct osc_t* synth_osc(u32 osc_num) {
 	return &synth.o[osc_num];
+}
+
+struct env_t* synth_env(u32 env_num) {
+	return &synth.e[env_num];
 }
 
 void synth_init() {
@@ -124,13 +176,30 @@ void synth_init() {
 	}
 	
 	synth.time       = 0.0;
-	synth.master_vol   = 0.5;
+	synth.master_vol   = 0.55;
 	synth.sample_rate  = asgot.freq;
+
+	for(int i = 0; i < 26; i++) {
+		synth.notes[i].used = 0;
+		synth.notes[i].on_tp = 0.0;
+		synth.notes[i].off_tp = 0.0;
+	}
+
 
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 		synth.o[i].wave_type = O_SQUARE;
 		synth.o[i].hz  = 0.0;
 		synth.o[i].vol = 0.5;
+		synth.o[i].note_offset = 0.0;
+		synth.e[i].attack     = 0.01;
+		synth.e[i].decay      = 0.0;
+		synth.e[i].release    = 0.05;
+		synth.e[i].sustain    = synth.o[i].vol;
+		/*
+		synth.e[i].key_down_tp = 0.0;
+		synth.e[i].key_up_tp   = 0.0;
+		synth.e[i].is_on = 0;
+		*/
 	}
 	
 	synth_set_paused(0);
