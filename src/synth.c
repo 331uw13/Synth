@@ -18,7 +18,7 @@ struct note_t {
 struct __synth {
 	u32 sample_rate;
 	double time;
-	double previous_out;
+	double prev_out;
 	double master_vol;
 	struct osc_t o[SYNTH_NUM_OSC];
 	struct env_t e[SYNTH_NUM_OSC];
@@ -27,26 +27,31 @@ struct __synth {
 
 
 double oscillate(u32 i, double hz) {
-	u32 type = synth.o[i].wave_type;
 	double res = 0.0;
+	struct osc_t* o = &synth.o[i];
+	u32 type = o->wave_type;
+	double frq = W(hz)*synth.time+o->lfo_ampl*hz*sin(W(o->lfo_freq)*synth.time);
 
 	if(hz != 0.0) {
 		switch(type) {
 		
 			case O_SINE:
-				res = sin(W(hz)*synth.time);
+				res = sin(frq);
 				break;
 			
 			case O_SAW:
-				res = (2.0/M_PI)*(hz*M_PI*fmod(synth.time,1.0/hz)-(M_PI/2.0));
+				for(double i = 1.0; i <= 100; i++) {
+					res += sin(i*frq)/i;
+				}
+				res *= (2.0/M_PI);
 				break;
 			
 			case O_SQUARE:
-				res = sin(W(hz)*synth.time) > 0.0 ? 1.0 : -1.0;
+				res = sin(frq) > 0.0 ? 1.0 : -1.0;
 				break;
 			
 			case O_TRIANGLE:
-				res = asin(sin(W(hz)*synth.time))*(2.0/M_PI);
+				res = asin(sin(frq))*(2.0/M_PI);
 				break;
 
 			case O_NOISE:
@@ -90,7 +95,10 @@ double get_env_amp(struct env_t* e, struct note_t* note, double time, double amp
 		a = ((time - note->off_tp)/e->release)*(-e->sustain)+e->sustain;
 	}
 
-	if(a <= 0.0001 || a == 0.0) {
+	if(a >= 1.0) {
+		a = 1.0;
+	}
+	else if(a <= 0.0001) {
 		a = 0.0;
 	}
 
@@ -118,6 +126,8 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 			if(note_amp <= 0.0 && !note->used) {
 				note->playing = 0;
 			}
+			
+			synth.prev_out = out;
 		}
 
 		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
@@ -153,6 +163,10 @@ double* synth_get_master_vol() {
 	return &synth.master_vol;
 }
 
+double synth_get_previous_out() {
+	return synth.prev_out;
+}
+
 struct osc_t* synth_osc(u32 osc_num) {
 	return &synth.o[osc_num];
 }
@@ -166,8 +180,8 @@ void synth_init() {
 	SDL_AudioSpec asgot;
 
 	asreq.format   = AUDIO_S16SYS;
-	asreq.freq     = 22050*2;
-	asreq.samples  = 512;
+	asreq.freq     = 22050;
+	asreq.samples  = 256;
 	asreq.channels = 1;
 	asreq.callback = sdlaudio_callback;
 
@@ -175,7 +189,7 @@ void synth_init() {
 		fprintf(stderr, "SDL_OpenAudio() failed! %s\n", SDL_GetError());
 	}
 	
-	synth.time       = 0.0;
+	synth.time         = 0.0;
 	synth.master_vol   = 0.55;
 	synth.sample_rate  = asgot.freq;
 
@@ -191,16 +205,15 @@ void synth_init() {
 		synth.o[i].hz  = 0.0;
 		synth.o[i].vol = 0.5;
 		synth.o[i].note_offset = 0.0;
+		synth.o[i].lfo_freq   = 0.0;
+		synth.o[i].lfo_ampl   = 0.1;
 		synth.e[i].attack     = 0.01;
-		synth.e[i].decay      = 0.0;
+		synth.e[i].decay      = 0.01;
 		synth.e[i].release    = 0.05;
 		synth.e[i].sustain    = synth.o[i].vol;
-		/*
-		synth.e[i].key_down_tp = 0.0;
-		synth.e[i].key_up_tp   = 0.0;
-		synth.e[i].is_on = 0;
-		*/
 	}
+	
+	synth.prev_out = 0.0;
 	
 	synth_set_paused(0);
 	printf("%i\n", asgot.freq);

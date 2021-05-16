@@ -10,7 +10,7 @@
 
 #define FONT_FILE "Topaz-8.ttf"
 #define WINDOW_REQWIDTH  1100
-#define WINDOW_REQHEIGHT 500
+#define WINDOW_REQHEIGHT 800
 #define VOLUME_BAR_WIDTH 40
 #define BUTTON_X_OFFSET 3     // Offset from left
 #define BUTTON_Y_OFFSET 2     // Offset from up
@@ -19,6 +19,7 @@
 #define BUTTON_BORDER   10    // Button size.
 #define LINE_CUT_OFF 5
 
+#define CIRCLE_SEGMENTS 10
 #define ENVELOPE_BAR_WIDTH 150
 
 #define MAX_ATTACK 1.5
@@ -292,7 +293,9 @@ void create_valuebar(struct valuebar_t* bar, u32 x, u32 y, u32 w, u32 h, double*
 #define TEXT_DECAY   2
 #define TEXT_SUSTAIN 3
 #define TEXT_RELEASE 4
-#define TEXT_NOTE_OFFSET   5
+#define TEXT_NOTE_OFFSET 5
+#define TEXT_LFO_FREQ 6
+#define TEXT_LFO_AMPL 7
 // ...
 
 
@@ -312,8 +315,7 @@ void main_loop() {
 		state.keys_down[i] = 0;
 	}
 
-	struct text_t volume_text;
-	struct text_t text_array[7];
+	struct text_t text_array[8];
 	struct text_t wave_options[5];
 	create_text(&wave_options[0], font, "SINE",     0,0,0,0, TEXT_NORMAL_COLOR);
 	create_text(&wave_options[1], font, "SAW",      0,0,0,0, TEXT_NORMAL_COLOR);
@@ -328,6 +330,8 @@ void main_loop() {
 	create_text(&text_array[TEXT_RELEASE], font, "RELEASE", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
 	
 	create_text(&text_array[TEXT_NOTE_OFFSET], font, "NOTE_OFFSET", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_LFO_FREQ], font, "LFO_FREQ", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
+	create_text(&text_array[TEXT_LFO_AMPL], font, "LFO_AMPL", 0, 0, 25,2, TEXT_OVERLAP_COLOR);
 
 
 	struct color_t default_color = { 200, 80, 85 };
@@ -336,12 +340,10 @@ void main_loop() {
 		create_color(i, &colors[i]);
 	}
 
-
 	struct valuebar_t volume_bar;
 	struct valuebar_t volume_bar_osc[SYNTH_NUM_OSC];
 	struct valuebar_t envelope_bars[SYNTH_NUM_OSC*4];
-	struct valuebar_t effect_bars[SYNTH_NUM_OSC];
-
+	struct valuebar_t effect_bars[SYNTH_NUM_OSC*3];
 
 	create_valuebar(&volume_bar, 
 			5, 5, VOLUME_BAR_WIDTH, state.wn_h-10,
@@ -353,6 +355,17 @@ void main_loop() {
 	
 		create_valuebar(&effect_bars[i], 0, 0, 200, wave_options[0].rect.h+BUTTON_BORDER,
 				&synth_osc(i)->note_offset, -12.0, 12.0);
+	
+
+		create_valuebar(&effect_bars[i+3], 0, 0, 200,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_osc(i)->lfo_freq, 0.0, 5.0);
+
+		create_valuebar(&effect_bars[i+6], 0, 0, 200,
+			   	wave_options[0].rect.h+BUTTON_BORDER,
+				&synth_osc(i)->lfo_ampl, 0.0, 1.0);
+
+
 		
 		create_valuebar(&envelope_bars[i], 0, 0, ENVELOPE_BAR_WIDTH,
 			   	wave_options[0].rect.h+BUTTON_BORDER,
@@ -369,16 +382,23 @@ void main_loop() {
 		create_valuebar(&envelope_bars[i+9], 0, 0, ENVELOPE_BAR_WIDTH,
 			   	wave_options[0].rect.h+BUTTON_BORDER,
 				&synth_env(i)->release, 0.0, MAX_RELEASE);
-	
 	}
 
 	double dt = 0.0;
 	double start_time = 0.0;
 	const double min_dt = 30.0 / 1000.0;
 	const u32 num_wave_options = sizeof wave_options / sizeof *wave_options;
+	const u32 num_texts = sizeof text_array / sizeof *text_array;
 
 	//synth_set_paused(1);
 	*synth_get_master_vol() = 0.20;
+
+
+	double test = 0.0;
+	const int circle_rad = 47;
+	const int circle_x = state.wn_w-circle_rad*3;
+	const int circle_y = (BTN_START_YOFF+BTN_YOFF)+
+		SYNTH_NUM_OSC*volume_bar_osc[0].rect.h+30+circle_rad;
 
 
 	SDL_Event event;
@@ -435,6 +455,42 @@ void main_loop() {
 
 		SDL_SetRenderDrawColor(sdlrenderer, BG_R, BG_G, BG_B, 255);
 		SDL_RenderClear(sdlrenderer);
+
+
+		// Create visual effect.
+
+		SDL_RenderSetScale(sdlrenderer, 5.0, 5.0);
+
+		double theta = 0.0;
+		double step = (2.0*M_PI)/CIRCLE_SEGMENTS;
+		test += fabs(synth_get_previous_out()*M_PI*0.25)+0.0135;
+
+		for(int i = 0; i < CIRCLE_SEGMENTS; i++) {
+			
+			double x0 = cos(test);
+			double y0 = sin(test);
+			float b = lerp((double)i/(double)CIRCLE_SEGMENTS, 0, 255);
+
+			double x = circle_x + cos(theta+x0)*(circle_rad+x0);
+			double y = circle_y + sin(theta+y0)*(circle_rad+y0);
+
+		
+			SDL_SetRenderDrawColor(sdlrenderer, 200, 80, 20, 255);
+			SDL_RenderDrawPoint(sdlrenderer, x/5.0, y/5.0);
+			
+			SDL_SetRenderDrawColor(sdlrenderer, 230, 24, 30, 255);
+			SDL_RenderDrawPoint(sdlrenderer, (x+5)/5.0, (y+5)/5.0);
+
+			theta += step;
+		}
+
+
+		SDL_RenderSetScale(sdlrenderer, 1.0, 1.0);
+
+
+
+
+
 
 		u32 x_off = 0;
 		u32 y_off = 0;
@@ -550,9 +606,6 @@ void main_loop() {
 			valuebar(bar, &state, &colors[i]);
 			set_rect_center(&text_array[TEXT_VOLUME].rect, &bar->rect);
 			render_text(&text_array[TEXT_VOLUME]);
-			int dest_y = bar->rect.y+bar->rect.h/2;
-			draw_line((x_off-BUTTON_X_OFFSET/2)+LINE_CUT_OFF, dest_y, bar->rect.x-LINE_CUT_OFF*2, dest_y, &colors[i]);
-		
 
 			bar = &effect_bars[i];
 			bar->rect.x = x_off+BUTTON_X_OFFSET+30 + bar->rect.w+30;
@@ -560,7 +613,6 @@ void main_loop() {
 			valuebar(bar, &state, &colors[i]);
 			set_rect_center(&text_array[TEXT_NOTE_OFFSET].rect, &bar->rect);
 			render_text(&text_array[TEXT_NOTE_OFFSET]);
-			
 		}
 		
 		
@@ -574,13 +626,24 @@ void main_loop() {
 				valuebar(bar, &state, &colors[i]);
 				set_rect_center(&text_array[TEXT_ATTACK+j].rect, &bar->rect);
 				render_text(&text_array[TEXT_ATTACK+j]);
-			
-				if(j < 3) {
-					int dest_y = bar->rect.y+bar->rect.h/2;
-					draw_line(bar->rect.x+bar->rect.w+LINE_CUT_OFF+BUTTON_X_OFFSET, dest_y,
-							bar->rect.x+bar->rect.w+35-LINE_CUT_OFF*2, dest_y, &colors[i]);
-				}
 			}
+
+
+			struct valuebar_t* bar = &effect_bars[i+3];	
+			bar->rect.x = x_off;
+			bar->rect.y = BTN_START_YOFF+40+(i+SYNTH_NUM_OSC*2)*(bar->rect.h+BUTTON_Y_SPACE);
+			valuebar(bar, &state, &colors[i]);
+			set_rect_center(&text_array[TEXT_LFO_FREQ].rect, &bar->rect);
+			render_text(&text_array[TEXT_LFO_FREQ]);
+
+			bar = &effect_bars[i+6];	
+			bar->rect.x = x_off;
+			bar->rect.y = BTN_START_YOFF+40+(i+SYNTH_NUM_OSC*3)*(bar->rect.h+BUTTON_Y_SPACE);
+			valuebar(bar, &state, &colors[i]);
+			set_rect_center(&text_array[TEXT_LFO_AMPL].rect, &bar->rect);
+			render_text(&text_array[TEXT_LFO_AMPL]);
+
+
 		}
 	
 
@@ -593,6 +656,11 @@ void main_loop() {
 	for(u32 i = 0; i < num_wave_options; i++) {
 		destroy_text(&wave_options[i]);
 	}
+
+	for(u32 i = 0; i < num_texts; i++) {
+		destroy_text(&text_array[i]);
+	}
+
 
 	TTF_CloseFont(font);
 }

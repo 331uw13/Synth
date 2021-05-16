@@ -24,8 +24,11 @@ struct osc_t {
 	u32    wave_type;
 	double hz;
 	double vol;
-	//u8     enabled;
+	
 	double note_offset;
+	double lfo_freq;
+	double lfo_ampl;
+	//u8     enabled;
 };
 
 struct env_t {
@@ -49,6 +52,7 @@ void synth_set_paused(u8 b);
 struct osc_t* synth_osc(u32 osc_num);
 struct env_t* synth_env(u32 env_num);
 
+double  synth_get_previous_out();
 double* synth_get_master_vol();
 
 void synth_init();
