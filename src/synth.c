@@ -117,15 +117,26 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 	const int buflen = bytes / sizeof *buf;
 	double start_time = synth.time;
 
-	if(synth.seq.time > (60.0/synth.seq.tempo)/synth.seq.sub_beats) {
-		synth.seq.time = 0.0;
+	if(synth.seq.enabled) {
+		if(synth.seq.time > (60.0/synth.seq.tempo)/synth.seq.sub_beats) {
+			synth.seq.time = 0.0;
 
-		int key = synth.seq.pattern[synth.seq.current];
-		synth_set_key_on(key);
+			if(synth.seq.current > SYNTH_SEQ_PATTERN_LENGTH) {
+				synth.seq.current = 0;
+			}
+			else if(synth.seq.current < 0) {
+				synth.seq.current = SYNTH_SEQ_PATTERN_LENGTH;
+			}
 
-		synth.seq.current++;
-		if(synth.seq.current > SYNTH_SEQ_PATTERN_LENGTH) {
-			synth.seq.current = 0;
+			int key = synth.seq.pattern[synth.seq.current];
+			synth_set_key_on(key);
+			synth.seq.callback(&synth.seq);
+
+
+			synth.seq.current++;
+			if(synth.seq.current > SYNTH_SEQ_PATTERN_LENGTH) {
+				synth.seq.current = 0;
+			}
 		}
 	}
 
@@ -158,7 +169,9 @@ void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 		synth.time += 1.0/((double)synth.sample_rate);
 	}
 
-	synth.seq.time += synth.time - start_time;
+	if(synth.seq.enabled) {
+		synth.seq.time += synth.time - start_time;
+	}
 }
 
 
@@ -210,6 +223,7 @@ void synth_init() {
 	asreq.freq     = 44100;
 	asreq.samples  = 256;
 	asreq.channels = 1;
+	//asreq.silence  = 5;
 	asreq.callback = sdlaudio_callback;
 
 	if(SDL_OpenAudio(&asreq, &asgot) < 0) {
@@ -242,14 +256,13 @@ void synth_init() {
 	
 	synth.o[0].vol = 0.5;
 	
-
-	synth.seq.sub_beats = 4.0;
+	synth.seq.enabled = 0;
+	synth.seq.sub_beats = 3.75;
 	synth.seq.note_time = 0.1;
 	synth.seq.current = 0;
 	synth.seq.tempo = 130.0;
 
-	u32 pattern[] = { 5, 0, 0, 1, 0, 0, 1, 0, 0, 3, 0, 0, 1, 0, 0, 0 };
-	memcpy(synth.seq.pattern, pattern, 16);
+	memset(synth.seq.pattern, 0, SYNTH_SEQ_PATTERN_LENGTH*sizeof *synth.seq.pattern);
 
 	synth.prev_out = 0.0;
 	synth_set_paused(0);
@@ -258,6 +271,10 @@ void synth_init() {
 void synth_quit() {
 	SDL_PauseAudio(1);
 	SDL_CloseAudio();
+}
+
+void synth_set_seq_callback(void(*callback)(struct seq_t*)) {
+	synth.seq.callback = callback;
 }
 
 

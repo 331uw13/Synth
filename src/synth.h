@@ -11,7 +11,7 @@
 #define SYNTH_NUM_OSC 3
 #define SYNTH_MAX_VOL 1.0
 
-#define SYNTH_SEQ_PATTERN_LENGTH 16
+#define SYNTH_SEQ_PATTERN_LENGTH 16*2
 
 #define O_SINE     0
 #define O_SAW      1
@@ -24,17 +24,19 @@
 
 
 struct seq_t {
-	u32 pattern[SYNTH_SEQ_PATTERN_LENGTH+1];
-	u32 current;
+	int pattern[SYNTH_SEQ_PATTERN_LENGTH+1];
+	int current;
 	double tempo;
 	double sub_beats;
 	double beat_time;
 	double time;
 	double note_time;
+	void(*callback)(struct seq_t*);
+	u8 enabled;
 };
 
 struct osc_t {
-	u32    wave_type;
+	int    wave_type;
 	double hz;
 	double vol;
 	
@@ -68,5 +70,7 @@ double* synth_get_master_vol();
 
 void synth_init();
 void synth_quit();
+
+void synth_set_seq_callback(void(*callback)(struct seq_t*));
 
 #endif
