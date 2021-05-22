@@ -6,23 +6,25 @@
 #define BASE_FREQ 130.0
 
 
-
 struct note_t {
 	u8 playing;
 	u8 used;
 	double on_tp;
 	double off_tp;
+	double play_time;
 };
 
 // NOTE: maybe just pass pointer to 'program state' to all functions...
 struct __synth {
 	u32 sample_rate;
 	double time;
+	double delta_time;
 	double prev_out;
 	double master_vol;
 	struct osc_t o[SYNTH_NUM_OSC];
 	struct env_t e[SYNTH_NUM_OSC];
 	struct note_t notes[26];
+	struct seq_t seq;
 } synth;
 
 
@@ -77,7 +79,6 @@ double clip(double a, double max) {
 
 double get_env_amp(struct env_t* e, struct note_t* note, double time, double amp) {
 	double a = 0.0;
-
 	if(note->used) {
 		double elapsed = time - note->on_tp;
 		
@@ -90,6 +91,12 @@ double get_env_amp(struct env_t* e, struct note_t* note, double time, double amp
 		if(elapsed > (e->attack+e->decay)) {
 			a = e->sustain;
 		}
+
+		if(elapsed > synth.seq.note_time) {
+			note->off_tp = synth.time;
+			note->used = 0;
+		}
+
 	}
 	else {
 		a = ((time - note->off_tp)/e->release)*(-e->sustain)+e->sustain;
@@ -108,48 +115,64 @@ double get_env_amp(struct env_t* e, struct note_t* note, double time, double amp
 void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 	short* buf = (short*)stream;
 	const int buflen = bytes / sizeof *buf;
+	double start_time = synth.time;
+
+	if(synth.seq.time > (60.0/synth.seq.tempo)/synth.seq.sub_beats) {
+		synth.seq.time = 0.0;
+
+		int key = synth.seq.pattern[synth.seq.current];
+		synth_set_key_on(key);
+
+		synth.seq.current++;
+		if(synth.seq.current > SYNTH_SEQ_PATTERN_LENGTH) {
+			synth.seq.current = 0;
+		}
+	}
+
 
 	for(int i = 0; i < buflen; i++) {
 		double out = 0.0;
+		
 		for(int i = 0; i < 26; i++) {
 			struct note_t* note = &synth.notes[i];
+
 			double note_amp = 0.0;
 			if(note->playing) {
+
 				for(int j = 0; j < SYNTH_NUM_OSC; j++) {
 					struct osc_t* o = &synth.o[j];
 					double amp = get_env_amp(&synth.e[j], note, synth.time, o->vol);
 					out += (oscillate(j, get_key_hz(round(i+o->note_offset)))*amp)*o->vol;
 					note_amp += amp;
 				}
-			}
 
-			if(note_amp <= 0.0 && !note->used) {
-				note->playing = 0;
-			}
+				if(note_amp <= 0.001 && !note->used) {
+					note->playing = 0;
+				}
 			
-			synth.prev_out = out;
+				synth.prev_out = out;
+			}
 		}
 
 		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
 		synth.time += 1.0/((double)synth.sample_rate);
 	}
+
+	synth.seq.time += synth.time - start_time;
 }
 
 
 void synth_set_key_on(u32 key) {
 	struct note_t* note = &synth.notes[key];
-
-	if(note->off_tp >= note->on_tp)  {
-		note->on_tp = synth.time;
-		note->playing = 1;
-		note->used = 1;
-	}
+	
+	note->on_tp = synth.time;
+	note->playing = 1;
+	note->used = 1;
 }
 
 
 void synth_set_key_off(u32 key) {
 	struct note_t* note = &synth.notes[key];
-
 	note->off_tp = synth.time;
 	note->used = 0;
 }
@@ -175,12 +198,16 @@ struct env_t* synth_env(u32 env_num) {
 	return &synth.e[env_num];
 }
 
+struct seq_t* synth_seq() {
+	return &synth.seq;
+}
+
 void synth_init() {
 	SDL_AudioSpec asreq;
 	SDL_AudioSpec asgot;
 
 	asreq.format   = AUDIO_S16SYS;
-	asreq.freq     = 22050;
+	asreq.freq     = 44100;
 	asreq.samples  = 256;
 	asreq.channels = 1;
 	asreq.callback = sdlaudio_callback;
@@ -190,7 +217,7 @@ void synth_init() {
 	}
 	
 	synth.time         = 0.0;
-	synth.master_vol   = 0.55;
+	synth.master_vol   = 0.20;
 	synth.sample_rate  = asgot.freq;
 
 	for(int i = 0; i < 26; i++) {
@@ -203,21 +230,29 @@ void synth_init() {
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 		synth.o[i].wave_type = O_SQUARE;
 		synth.o[i].hz  = 0.0;
-		synth.o[i].vol = 0.5;
+		synth.o[i].vol = 0.0;
 		synth.o[i].note_offset = 0.0;
 		synth.o[i].lfo_freq   = 0.0;
 		synth.o[i].lfo_ampl   = 0.1;
 		synth.e[i].attack     = 0.01;
 		synth.e[i].decay      = 0.01;
 		synth.e[i].release    = 0.05;
-		synth.e[i].sustain    = synth.o[i].vol;
+		synth.e[i].sustain    = 1.0;
 	}
 	
-	synth.prev_out = 0.0;
+	synth.o[0].vol = 0.5;
 	
-	synth_set_paused(0);
-	printf("%i\n", asgot.freq);
 
+	synth.seq.sub_beats = 4.0;
+	synth.seq.note_time = 0.1;
+	synth.seq.current = 0;
+	synth.seq.tempo = 130.0;
+
+	u32 pattern[] = { 5, 0, 0, 1, 0, 0, 1, 0, 0, 3, 0, 0, 1, 0, 0, 0 };
+	memcpy(synth.seq.pattern, pattern, 16);
+
+	synth.prev_out = 0.0;
+	synth_set_paused(0);
 }
 
 void synth_quit() {

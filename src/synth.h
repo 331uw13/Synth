@@ -2,6 +2,7 @@
 #define SYNTH_H
 
 #include <math.h>
+#include <SDL2/SDL.h>
 #include <SDL2/SDL_audio.h>
 
 #include "typedefs.h"
@@ -9,6 +10,8 @@
 
 #define SYNTH_NUM_OSC 3
 #define SYNTH_MAX_VOL 1.0
+
+#define SYNTH_SEQ_PATTERN_LENGTH 16
 
 #define O_SINE     0
 #define O_SAW      1
@@ -19,6 +22,16 @@
 #define MIN(a, b) (a <= b ? b : a)
 #define MAX(a, b) (a >= b ? b : a)
 
+
+struct seq_t {
+	u32 pattern[SYNTH_SEQ_PATTERN_LENGTH+1];
+	u32 current;
+	double tempo;
+	double sub_beats;
+	double beat_time;
+	double time;
+	double note_time;
+};
 
 struct osc_t {
 	u32    wave_type;
@@ -36,9 +49,6 @@ struct env_t {
 	double decay;
 	double release;
 	double sustain;
-//	double key_down_tp; // Key down timepoint.
-//	double key_up_tp;   // Key up timepoint.
-//	u8    is_on;
 };
 
 
@@ -51,6 +61,7 @@ void synth_set_paused(u8 b);
 
 struct osc_t* synth_osc(u32 osc_num);
 struct env_t* synth_env(u32 env_num);
+struct seq_t* synth_seq();
 
 double  synth_get_previous_out();
 double* synth_get_master_vol();
