@@ -5,6 +5,10 @@
 #define W(a) (a*M_PI*2.0)
 #define BASE_FREQ 130.0
 
+#define FREQUENCY 44100
+#define SAMPLES   512
+
+
 
 struct note_t {
 	u8 playing;
@@ -16,55 +20,58 @@ struct note_t {
 
 // NOTE: maybe just pass pointer to 'program state' to all functions...
 struct __synth {
-	u32 sample_rate;
 	float time;
 	float delta_time;
 	float prev_out;
 	float master_vol;
+	float note_time;
+	float pos;
 	struct osc_t o[SYNTH_NUM_OSC];
 	struct env_t e[SYNTH_NUM_ENV];
 	struct lfo_t l[SYNTH_NUM_LFO];
 	struct note_t notes[26];
-	struct seq_t seq;
 } synth;
 
+double synth_get_lfo(u32 num) {
+	struct lfo_t* lfo = &synth.l[num];
+	return lfo->ampl*sin(W(lfo->freq)*synth.time);
+}
 
-float oscillate(u32 i, float hz) {
+float oscillate(struct osc_t* o, float hz) {
 	float res = 0.0;
-	struct osc_t* o = &synth.o[i];
+	
+	//struct lfo_t* lfo = &synth.l[0];
 	u32 type = o->wave_type;
-	float frq = W(hz)*synth.time;//+o->lfo_ampl*hz*sin(W(o->lfo_freq)*synth.time);
+	float frq = W(hz)*synth.time;//+lfo->ampl*hz*sin(W(lfo->freq)*synth.time);
 
-	if(hz != 0.0) {
-		switch(type) {
+	switch(type) {
+	
+		case O_SINE:
+			res = sin(frq);
+			break;
 		
-			case O_SINE:
-				res = sin(frq);
-				break;
-			
-			case O_SAW:
-				for(float i = 1.0; i <= 100; i++) {
-					res += sin(i*frq)/i;
-				}
-				res *= (2.0/M_PI);
-				break;
-			
-			case O_SQUARE:
-				res = sin(frq) > 0.0 ? 1.0 : -1.0;
-				break;
-			
-			case O_TRIANGLE:
-				res = asin(sin(frq))*(2.0/M_PI);
-				break;
+		case O_SAW:
+			for(float i = 1.0; i <= 50; i++) {
+				res += sin(i*frq)/i;
+			}
+			res *= (2.0/M_PI);
+			break;
+		
+		case O_SQUARE:
+			res = sin(frq) > 0.0 ? 1.0 : -1.0;
+			break;
+		
+		case O_TRIANGLE:
+			res = asin(sin(frq))*(2.0/M_PI);
+			break;
 
-			case O_NOISE:
-				res = 2.0*((float)rand()/(float)RAND_MAX)-1.0;
-				break;
+		case O_NOISE:
+			res = 2.0*((float)rand()/(float)RAND_MAX)-1.0;
+			break;
 
-			default: 
-				res = 0.0;
-				break;
-		}
+		default: 
+			res = 0.0;
+			break;
 	}
 
 	return res;
@@ -93,7 +100,7 @@ float get_env_amp(struct env_t* e, struct note_t* note, float time, float amp) {
 			a = e->sustain;
 		}
 
-		if(elapsed > synth.seq.note_time) {
+		if(elapsed > synth.note_time) {
 			note->off_tp = synth.time;
 			note->used = 0;
 		}
@@ -116,62 +123,40 @@ float get_env_amp(struct env_t* e, struct note_t* note, float time, float amp) {
 void sdlaudio_callback(void* userdata, u8* stream, int bytes) {
 	short* buf = (short*)stream;
 	const int buflen = bytes / sizeof *buf;
-	float start_time = synth.time;
-
-	if(synth.seq.enabled) {
-		if(synth.seq.time > (60.0/(float)synth.seq.tempo)/4.0) {
-			synth.seq.time = 0.0;
-
-			if(synth.seq.current > SYNTH_SEQ_PATTERN_LENGTH) {
-				synth.seq.current = 0;
-			}
-			else if(synth.seq.current < 0) {
-				synth.seq.current = SYNTH_SEQ_PATTERN_LENGTH;
-			}
-
-			int key = synth.seq.pattern[synth.seq.current];
-			if(key >= 0) {
-				synth_set_key_on(key);
-			}
-
-			synth.seq.current++;
-			if(synth.seq.current >= SYNTH_SEQ_PATTERN_LENGTH) {
-				synth.seq.current = 0;
-			}
-		}
-	}
-
+	
 
 	for(int i = 0; i < buflen; i++) {
-		float out = 0.0;
 		
-		for(int i = 0; i < 26; i++) {
-			struct note_t* note = &synth.notes[i];
+		synth.pos += 1.0;
 
+		if(synth.pos >= 10000000.0) {
+			synth.pos = 0.0;
+		}
+
+		float out = 0.0;
+		for(int i = 0; i < 25; i++) {
+			struct note_t* note = &synth.notes[i];
 			float note_amp = 0.0;
 			if(note->playing) {
-
 				for(int j = 0; j < SYNTH_NUM_OSC; j++) {
 					struct osc_t* o = &synth.o[j];
 					float amp = get_env_amp(&synth.e[j], note, synth.time, o->vol);
-					out += (oscillate(j, get_key_hz(round(i+o->note_offset)))*amp)*o->vol;
+					out += (oscillate(o, get_key_hz(i+o->note_offset))*amp)*o->vol;
 					note_amp += amp;
 				}
 
 				if(note_amp <= 0.001 && !note->used) {
 					note->playing = 0;
 				}
-			
-				synth.prev_out = out;
 			}
 		}
 
-		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
-		synth.time += 1.0/((float)synth.sample_rate);
-	}
+		if(synth.pos != 0.0) {
+			synth.time = synth.pos/(float)FREQUENCY;
+		}
+		
 
-	if(synth.seq.enabled) {
-		synth.seq.time += synth.time - start_time;
+		buf[i] = (short)(clip(out*synth.master_vol,1.0)*(65536/SYNTH_NUM_OSC));
 	}
 
 }
@@ -201,6 +186,10 @@ float* synth_master_vol() {
 	return &synth.master_vol;
 }
 
+float* synth_note_time() {
+	return &synth.note_time;
+}
+
 struct osc_t* synth_osc(u32 num) {
 	return &synth.o[num];
 }
@@ -213,17 +202,13 @@ struct lfo_t* synth_lfo(u32 num) {
 	return &synth.l[num];
 }
 
-struct seq_t* synth_seq() {
-	return &synth.seq;
-}
-
 void synth_init() {
 	SDL_AudioSpec asreq;
 	SDL_AudioSpec asgot;
 
 	asreq.format   = AUDIO_S16SYS;
-	asreq.freq     = 44100;
-	asreq.samples  = 256;
+	asreq.freq     = FREQUENCY;
+	asreq.samples  = SAMPLES;
 	asreq.channels = 1;
 	//asreq.silence  = 5;
 	asreq.callback = sdlaudio_callback;
@@ -232,9 +217,10 @@ void synth_init() {
 		fprintf(stderr, "SDL_OpenAudio() failed! %s\n", SDL_GetError());
 	}
 	
+
+	synth.pos          = 0.0;
 	synth.time         = 0.0;
 	synth.master_vol   = 0.20;
-	synth.sample_rate  = asgot.freq;
 
 	for(int i = 0; i < 26; i++) {
 		synth.notes[i].used = 0;
@@ -246,23 +232,16 @@ void synth_init() {
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 		synth.o[i].wave_type = O_SQUARE;
 		synth.o[i].hz  = 0.0;
-		synth.o[i].vol = 0.0;
+		synth.o[i].vol = 0.20;
 		synth.o[i].note_offset = 0.0;
-		synth.e[i].attack     = 0.01;
-		synth.e[i].decay      = 0.01;
-		synth.e[i].release    = 0.05;
+		synth.e[i].attack     = 0.001;
+		synth.e[i].decay      = 0.001;
+		synth.e[i].release    = 0.001;
 		synth.e[i].sustain    = 1.0;
 	}
-	
-	synth.o[0].vol = 0.5;
-	
-	synth.seq.enabled = 0;
-	synth.seq.note_time = 0.1;
-	synth.seq.current = 0;
-	synth.seq.tempo = 130;
 
-	memset(synth.seq.pattern, 0, SYNTH_SEQ_PATTERN_LENGTH*sizeof *synth.seq.pattern);
-
+	synth.note_time = 0.1;
+	
 	synth.prev_out = 0.0;
 	synth_set_paused(0);
 }
@@ -270,10 +249,6 @@ void synth_init() {
 void synth_quit() {
 	SDL_PauseAudio(1);
 	SDL_CloseAudio();
-}
-
-void synth_set_seq_callback(void(*callback)(struct seq_t*)) {
-	synth.seq.callback = callback;
 }
 
 

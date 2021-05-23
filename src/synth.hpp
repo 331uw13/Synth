@@ -4,6 +4,7 @@
 #include <math.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_audio.h>
+#include <GLFW/glfw3.h>
 
 typedef unsigned char   u8;
 typedef unsigned short  u16;
@@ -11,9 +12,9 @@ typedef unsigned int    u32;
 typedef long unsigned int  u64;
 
 
-#define SYNTH_NUM_OSC 2
-#define SYNTH_NUM_ENV 2
-#define SYNTH_NUM_LFO 4
+#define SYNTH_NUM_OSC 4
+#define SYNTH_NUM_ENV 4
+#define SYNTH_NUM_LFO 6
 
 
 #define SYNTH_MAX_VOL 1.0
@@ -33,16 +34,20 @@ struct seq_t {
 	int pattern[SYNTH_SEQ_PATTERN_LENGTH+1];
 	int current;
 	int tempo;
-	float beat_time;
 	float time;
-	float note_time;
-	void(*callback)(struct seq_t*);
+	u8 enabled;
+};
+
+struct rand_seq_t {
+	int current;
+	int tempo;
+	float time;
 	u8 enabled;
 };
 
 struct osc_t {
 	int    wave_type;
-	float note_offset;
+	int   note_offset;
 	float hz;
 	float vol;
 };
@@ -64,20 +69,17 @@ struct lfo_t {
 
 
 void synth_set_key_on(u32 key);
-void synth_set_key_off(u32 key);
 void synth_set_paused(u8 b);
 
-double synth_get_lfo();
+double synth_get_lfo(u32 num);
 
 struct osc_t* synth_osc(u32 num);
 struct env_t* synth_env(u32 num);
 struct lfo_t* synth_lfo(u32 num);
-struct seq_t* synth_seq();
 
 float* synth_master_vol();
+float* synth_note_time();
 void synth_init();
 void synth_quit();
-
-void synth_set_seq_callback(void(*callback)(struct seq_t*));
 
 #endif
