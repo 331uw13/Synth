@@ -3,8 +3,6 @@
 
 #include "synth.h"
 
-#define W(a) (a*M_PI*2.0)
-
 
 
 static void audio_callback(void* userdata, u8* stream, int bytes);
@@ -27,6 +25,14 @@ struct state_t* synth_init(int freq, int samples) {
 		s->flags = NOT_INITIALIZED;
 		goto finish;
 	}
+
+	if(TTF_Init() < 0) {
+		fprintf(stderr, "ERROR: %s", SDL_GetError());
+		s->flags = NOT_INITIALIZED;
+		goto finish;
+	}
+
+	s->font = TTF_OpenFont(FONT_FILE, 10);
 
 	if((s->w = SDL_CreateWindow(WINDOW_TITLE, 
 					SDL_WINDOWPOS_CENTERED,
@@ -51,14 +57,17 @@ struct state_t* synth_init(int freq, int samples) {
 	request.format = AUDIO_S16SYS;
 	request.samples = samples;
 	request.callback = audio_callback;
+	request.userdata = (void*)s;
 	request.channels = 1;
 
-	if(SDL_OpenAudio(&s->audio, &request) < 0) {
+	if(SDL_OpenAudio(&request, &s->audio) < 0) {
 		fprintf(stderr, "ERROR: Failed to open audio device! %s\n", SDL_GetError());
 		goto finish;
 	}
 
-	s->master_vol = 0.2;
+	SDL_PauseAudio(0);
+
+	s->main_vol = 0.2;
 	s->time = 0.0;
 	s->time_pos = 0.0;
 
@@ -68,11 +77,17 @@ struct state_t* synth_init(int freq, int samples) {
 
 
 finish:
+
 	return s;
 }
 
 
 void synth_quit(struct state_t* s) {
+	
+	for(int i = 0; i < s->num_texts; i++) {
+		destroy_text(&s->texts[i]);
+	}
+
 	if(s->w != NULL) { SDL_DestroyWindow(s->w); }
 	if(s->r != NULL) { SDL_DestroyRenderer(s->r); }
 	SDL_Quit();
@@ -82,9 +97,70 @@ void synth_quit(struct state_t* s) {
 	exit(EXIT_SUCCESS);
 }
 
+double clip(double v, double max) {
+	return (v > 0.0 ? MIN(v, max) : MAX(v, -max));
+}
+
+void oscillate(struct osc_t* osc, double time, double hz) {
+	if(osc != NULL && osc->output != NULL) {
+		const double f = TO2PI(hz+osc->pitch)*time+osc->input;
+
+		switch(osc->waveform) {
+			
+			case W_SINE:
+				*osc->output = (sin(f));
+				break;
+			
+			case W_ABS_SINE:
+				*osc->output = fabs(sin(f-0.5));
+				break;
+
+			case W_SQUARE:
+				*osc->output = SIGN(sin(f))*0.5;
+				break;
+
+			case W_TRIANGLE:
+				*osc->output = asin(sin(f));
+				break;
+			
+			case W_SAW:
+				for(double i = 1.0; i < 100.0; i+=1.0) {
+					*osc->output += sin(i*f)/i;
+				}
+				*osc->output *= 0.5;
+				break;
+
+			default:
+				*osc->output = 0.0;
+				break;
+		}
+
+	}
+}
 
 
 void audio_callback(void* userdata, u8* stream, int bytes) {
+	struct state_t* s = (struct state_t*)userdata;
+	short* buf = (short*)stream;
+	const u32 buf_len = bytes/sizeof* buf;
+
+	for(u32 i = 0; i < buf_len; i++) {
+
+		oscillate(&s->osc[0], s->time, 130.0);
+
+
+
+		buf[i] = (short)(clip(s->sound_output*s->main_vol, 1.0)*VOLUME_SCALE);
+
+		s->sound_output = 0.0;
+		s->time_pos += 1.0;
+		if(s->time_pos >= 10000000.0) { s->time_pos = 0.0; }
+		
+		s->time = s->time_pos/s->audio.freq;
+	}
+
+
+
 }
 
 

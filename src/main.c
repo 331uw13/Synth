@@ -4,7 +4,6 @@
 //
 
 #include "synth.h"
-#include "gui.h"
 
 #define GET_R(r) (r>>16)
 #define GET_G(g) (g>>8)
@@ -42,15 +41,21 @@ void draw_line(struct state_t* s, double x0, double y0, double x1, double y1, in
 
 void draw_point(struct state_t* s, double x, double y, int size, int color) {
 	set_color(s, color);
+	SDL_Rect r = { x, y, size, size };
+	SDL_RenderFillRect(s->r, &r);
+	/*
 	SDL_RenderSetScale(s->r, size, size);
 	SDL_RenderDrawPoint(s->r, x/size, y/size);
 	SDL_RenderSetScale(s->r, 1, 1);
+	*/
 }
 
 
 
 void handle_event(struct state_t* s) {
 	SDL_Event event;
+	s->flags &= ~MOUSE_LEFT_DOWN;
+	s->flags &= ~MOUSE_RIGHT_DOWN;
 
 	while(SDL_PollEvent(&event)) {
 		switch(event.type) {
@@ -61,25 +66,21 @@ void handle_event(struct state_t* s) {
 				break;
 
 			case SDL_MOUSEBUTTONDOWN:
-				/*
-				s->mouse_down_x = s->mouse_x;
-				s->mouse_down_y = s->mouse_y;
-				s->flags |= RESTORE_MOUSE_POS;
-				*/
-				s->flags |= MOUSE_DOWN;
-				//SDL_ShowCursor(0);
+				if(event.button.button == SDL_BUTTON_RIGHT) {
+					s->flags |= MOUSE_RIGHT_DOWN;
+					s->flags &= ~DRAG_WIRE;
+				}
+				else if(event.button.button == SDL_BUTTON_LEFT){
+					if(!(s->flags & MOUSE_LEFT_DOWN)) {
+						s->mouse_down_x = s->mouse_x;
+						s->mouse_down_y = s->mouse_y;
+					}
+					s->flags |= MOUSE_LEFT_DOWN;
+				}
 				break;
 			
 			case SDL_MOUSEBUTTONUP:
 				s->focus_index = -1;
-				/*
-				if(s->flags & RESTORE_MOUSE_POS) {
-					SDL_WarpMouseInWindow(s->w, s->mouse_down_x, s->mouse_down_y);
-					s->flags &= ~RESTORE_MOUSE_POS;
-				}
-				*/
-				s->flags &= ~MOUSE_DOWN;
-				//SDL_ShowCursor(1);
 				break;
 			
 			case SDL_QUIT:
@@ -99,67 +100,116 @@ double lerp(double v, double min, double max) {
 	return (max-min)*v+min;
 }
 
+void render_text(struct state_t* s, struct text_t* t, int x, int y) {
+	if(t != NULL) {
+		t->rect.x = x;
+		t->rect.y = y;
+		SDL_RenderCopy(s->r, t->texture, NULL, &t->rect);
+	}
+}
+
+void render_wire_point(struct state_t* s, struct wire_point_t* p) {
+	if(p->type != WIRE_TYPE_NONE) {
+		const u8 hover = AREA_OVERLAP(s->mouse_x, s->mouse_y, p->x-5, p->y-5, 20, 20);
+
+		if(hover && (s->flags & MOUSE_LEFT_DOWN)) {
+			if(s->flags & DRAG_WIRE) {
+				struct wire_point_t* w = s->wire_point_drag_origin;
+				if(w->type == WIRE_TYPE_OUTPUT) {
+					p->in_ptr = w->out_ptr;
+				}
+				else if(w->type == WIRE_TYPE_INPUT) {
+					w->in_ptr = p->out_ptr;
+				}
+
+				s->flags &= ~DRAG_WIRE;
+			}
+			else {
+				s->wire_point_drag_origin = p;
+				s->flags |= DRAG_WIRE;
+			}
+		}
+		
+		draw_point(s, p->x, p->y, 10, p->color);
+
+	}
+}
+
 void render_knob(struct state_t* s, int index) {
 	struct knob_t* k = &s->knobs[index];
 
 	const u8 hover = AREA_OVERLAP(
 			s->mouse_x, s->mouse_y,
-			k->center_x, k->center_y, KNOB_RADIUS*2, KNOB_RADIUS*2);
-	const u8 used = hover && (s->flags & MOUSE_DOWN);
+			k->x, k->y, KNOB_RADIUS*2, KNOB_RADIUS*2);
+	const u8 used = hover && (s->flags & MOUSE_LEFT_DOWN);
 
 	if(used && s->focus_index < 0) {
 		s->focus_index = index;
 	}
 
 	const int col = (s->focus_index == index 
-			|| (hover && s->focus_index < 0)) ? 0xA0A0A0 : 0x808080;
+			|| (hover && s->focus_index < 0)) ? 0x606666 : 0x505555;
 
+	const u8 int_data = (k->data_type == DATA_TYPE_INT);
+
+	if(k->wire_point.in_ptr != NULL) {
+		*k->ptr_d = *k->wire_point.in_ptr;
+	}
 
 	// I have modified it and made it little bit better(at least i think so..)
 	// but the idea is same...
 	// Here is the original one for "imgui knob widget":
 	// https://github.com/ocornut/imgui/issues/942#issuecomment-268747260
 
-	const double cx = k->center_x+KNOB_RADIUS;
-	const double cy = k->center_y+KNOB_RADIUS;
-	const double norm = normalize(*k->ptr, k->min, k->max);
+	const double min = int_data ? (double)k->min_i : k->min_d;
+	const double max = int_data ? (double)k->max_i : k->max_d;
+
+	const double cx = k->x+KNOB_RADIUS;
+	const double cy = k->y+KNOB_RADIUS;
+	const double norm = normalize(int_data ? *k->ptr_i : *k->ptr_d, min, max);
+
 	const double p = M_PI/4.0;
 	double a = (M_PI-p)*norm*2.0+p;
 	
-	double x = -sin(a)*KNOB_RADIUS*1.2+cx;
-	double y =  cos(a)*KNOB_RADIUS*1.2+cy;
+	double x = -sin(a)*KNOB_RADIUS+cx;
+	double y =  cos(a)*KNOB_RADIUS+cy;
 	const double x2 = -sin(a)*KNOB_RADIUS*0.5+cx;
 	const double y2 =  cos(a)*KNOB_RADIUS*0.5+cy;
 
 	if(s->focus_index == index) {
-		a = M_PI+atan2(s->mouse_x-cx, cy-s->mouse_y);
-		a = MAX(p, MIN(2.0*M_PI-p, a));
-		*k->ptr = lerp(0.5*(a-p)/(M_PI-p), k->min, k->max);
+		double a2 = M_PI+atan2(s->mouse_x-cx, cy-s->mouse_y);
+		a2 = MAX(p, MIN(2.0*M_PI-p, a2));
+		double new_value = lerp(0.5*(a2-p)/(M_PI-p), min, max);	
+		double new_x = -sin(a2)*KNOB_RADIUS*1.2;
+
+		if(!(((int_data ? *k->ptr_i : *k->ptr_d) <= min && new_x > 0) 
+					|| ((int_data ? *k->ptr_i : *k->ptr_d) >= max && new_x < 0))) {
+			if(int_data) { *k->ptr_i = (int)round(new_value); }
+			else         { *k->ptr_d = new_value; }
+		}
 	}
 
-	const double r = KNOB_RADIUS/2.0;
-
-	draw_circle(s, k->center_x, k->center_y, KNOB_RADIUS, 16, col);
-	draw_circle(s, k->center_x+r, k->center_y+r, r, 16, 0x303030);
-
-	draw_line(s, x2, y2, x, y, 0x00FFFF);
-	draw_line(s, x2, y2, x, y, 0x00FFFF);
+	draw_circle(s, k->x, k->y, KNOB_RADIUS, 16, col);
+	draw_line(s, x2, y2, x, y, k->color);
+	render_text(s, k->text, cx-k->text->rect.w/2, k->y+KNOB_RADIUS*2+k->text->rect.h/2);
 
 	// ---------------------
-
+	
+	render_wire_point(s, &k->wire_point);
 
 	// Create half circle to rotate with line.
 	
+	const double r = KNOB_RADIUS/2.0;
 	const double num = 16.0;
 	const double step = (M_PI*2.0)/num;
-	double x3 = k->center_x+r*2;
-	double y3 = k->center_y+r*2;
+	double x3 = k->x+r*2;
+	double y3 = k->y+r*2;
 	double t  = step+a;
 
 	double x0 = x3+cos(t)*r;
 	double y0 = y3+sin(t)*r;
 	
-	set_color(s, 0x107070);
+	set_color(s, k->color);
 
 	for(int i = 0; i < (num/2)-1; i++) {
 		const double x1 = x0;
@@ -171,24 +221,43 @@ void render_knob(struct state_t* s, int index) {
 	}
 }
 
-
 void render(struct state_t* s) {
+	
+	for(int i = 0; i < s->num_boxes; i++) {
+		set_color(s, 0x353535);
+		SDL_RenderFillRect(s->r, &s->boxes[i]);
+	}
+	
 	for(int i = 0; i < s->num_knobs; i++) {
 		render_knob(s, i);
 	}
+
+	for(int i = 0; i < s->num_output_points; i++) {
+		render_wire_point(s, &s->output_points[i]);
+	}
+
+	if(s->flags & DRAG_WIRE) {
+		struct wire_point_t* w = s->wire_point_drag_origin;
+		if(w != NULL) {
+			draw_line(s, w->x+5, w->y+5, s->mouse_x, s->mouse_y, w->color);
+		}
+	}
+	s->test_value = sin(s->time)*200.0+200.0;
 }
 
 
 void main_loop(struct state_t* s) {
 
 	double dt = 0.0;  // delta time.
-	const double min_dt = 30.0 / 1000.0;
+	const double min_dt = 20.0 / 1000.0;
+
+	s->osc[0].output = &s->sound_output; // DELETE LATER.
 
 	while(!(s->flags & SHOULD_QUIT)) {
 		const double frame_start = SDL_GetPerformanceCounter();
 		handle_event(s);
-	
-		SDL_SetRenderDrawColor(s->r, 20, 20, 20, 255);
+
+		SDL_SetRenderDrawColor(s->r, 30, 30, 30, 255);
 		SDL_RenderClear(s->r);
 
 		render(s);
@@ -202,32 +271,39 @@ void main_loop(struct state_t* s) {
 	}
 }
 
-static double test_value0 = 0.0;
-static double test_value1 = 0.0;
-
 
 void add_stuff(struct state_t* s) {
 
-	s->next_knob_x = 200;
-	s->next_knob_y = 200;
+	int y = 0;
+	const int def_color = 0x30A030;
+	const int osc_color = 0x20A0FF;
+	
+	add_box(s, 0, 0, 4, 2);
+	add_knob_f(s, "main_vol", &s->main_vol, 0.0, 1.0, 0, y, def_color, 0);
+	y++;
 
-	add_knob(s, "test_knob0", &test_value0, 0.0, 15.0);
-	add_knob(s, "test_knob1", &test_value1, -3.0, 3.0);
+	add_output_point(s, &s->test_value, 25, 10);
+
+	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+		add_box(s, 0, y, 4, 1);
+		add_knob_f(s, "vol", &s->osc[i].vol, 0.0, 1.0, 0, y, osc_color, 0);
+		add_knob_f(s, "pitch", &s->osc[i].pitch, 0.0, 400.0, 1, y, osc_color, 1);
+		add_knob_i(s, "wave", &s->osc[i].waveform, 0, NUM_WAVE_OPTIONS, 2, y, osc_color);
+		y++;
+	}
 
 }
-
 
 
 int main() {
 	struct state_t* s = NULL;
 	s = synth_init(44100, 512);
 	
-	if(s == NULL || (s->flags & NOT_INITIALIZED)) {
-		return -1;
+	if(s != NULL && !(s->flags & NOT_INITIALIZED)) {
+		add_stuff(s);
+		main_loop(s);
 	}
 
-	add_stuff(s);
-	main_loop(s);
 	synth_quit(s);
 	return 0;
 }
