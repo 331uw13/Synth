@@ -11,22 +11,34 @@ typedef unsigned int       u32;
 typedef long unsigned int  u64;
 
 #define FONT_FILE    "Topaz-8.ttf"
-#define WINDOW_TITLE "Synthesizer and learning about music..."
+#define WINDOW_TITLE "Synthesizer! and learning about music..."
 
+
+#define MAX_NUM_BOXES  64
+#define MAX_NUM_TEXTS  64
+#define MAX_NUM_KNOBS  32
+#define MAX_NUM_OUTPUTS 32
+#define MAX_NUM_INPUTS  32
 
 #define SYNTH_MAX_VOL 1.0
 #define SYNTH_NUM_OSC 3
 #define SYNTH_NUM_ENV 3
 #define SYNTH_NUM_LFO 2
 
-#define KNOB_RADIUS 25.0
+#define KNOB_RADIUS 24.0
 #define SYNTH_SEQ_PATTERN_LENGTH 32
 
+#define GUI_ITEM_OFFSET  25
+#define GUI_FRAME_OFFSET 3
+#define GUI_CELL_HEIGHT  (KNOB_RADIUS*2+GUI_ITEM_OFFSET)
+#define GUI_CELL_WIDTH   (KNOB_RADIUS*2+GUI_ITEM_OFFSET)
+
+/*
 #define GUI_ITEM_X_SPACE  60
 #define GUI_ITEM_Y_SPACE  50
 #define GUI_ITEM_X_OFFSET (KNOB_RADIUS*2+30)
 #define GUI_ITEM_Y_OFFSET (KNOB_RADIUS*2+50)
-
+*/
 #define W_SINE      0
 #define W_ABS_SINE  1
 #define W_SQUARE    2
@@ -34,9 +46,9 @@ typedef long unsigned int  u64;
 #define W_SAW       4
 #define NUM_WAVE_OPTIONS 4
 
-#define WIRE_TYPE_NONE    -1
-#define WIRE_TYPE_INPUT   (1<<0)
-#define WIRE_TYPE_OUTPUT  (1<<1)
+#define WIRE_TYPE_NONE    0
+#define WIRE_TYPE_INPUT   1
+#define WIRE_TYPE_OUTPUT  2
 
 #define DATA_TYPE_INT 0
 #define DATA_TYPE_DOUBLE 1
@@ -48,11 +60,13 @@ typedef long unsigned int  u64;
 #define AREA_OVERLAP(xa,ya,xb,yb,w,h) ((xa >= xb && xa <= xb+w) && (ya >= yb && ya <= yb+h))
 #define TO2PI(a) ((a)*M_PI*2.0)
 
+// "flags" for "struct state_t"
 #define NOT_INITIALIZED (1<<0)
 #define SHOULD_QUIT     (1<<1)
 #define MOUSE_LEFT_DOWN   (1<<2)
 #define MOUSE_RIGHT_DOWN  (1<<3)
-#define DRAG_WIRE       (1<<4)
+#define DRAG_WIRE         (1<<4)
+
 
 
 
@@ -101,36 +115,33 @@ struct text_t {
 	SDL_Rect rect;
 };
 
-struct wire_point_t {
+struct wirept_t {
+	union {
+		double* in_ptr;
+		double* out_ptr;
+	};
 	int type;
-	double* in_ptr;
-	double* out_ptr;
 	int color;
 	int x;
 	int y;
 };
 
-
 struct knob_t {
-	struct text_t* text;
-	struct wire_point_t wire_point;
-
 	union {
 		struct {
 			double* ptr_d;
 			double min_d;
 			double max_d;
 		};
-
 		struct {
 			int* ptr_i;
 			int min_i;
 			int max_i;
 		};
 	};
-	
-	int color;
+	struct text_t* text;
 	int data_type;
+	int color;
 	int x;
 	int y;
 };
@@ -141,7 +152,6 @@ struct state_t {
 	SDL_Renderer*  r;
 	SDL_AudioSpec  audio;
 	TTF_Font*      font;
-	SDL_Rect       boxes[32];
 
 	int flags;
 	int mouse_x;
@@ -149,6 +159,8 @@ struct state_t {
 	int mouse_down_x;
 	int mouse_down_y;
 	int focus_index;
+	int window_w;
+	int window_h;
 
 	double test_value; // DELETE LATER.
 
@@ -163,18 +175,42 @@ struct state_t {
 	struct env_t env[SYNTH_NUM_ENV];
 	struct lfo_t lfo[SYNTH_NUM_LFO];
 
-	struct text_t texts[32];
-	struct knob_t knobs[32];
-	struct wire_point_t output_points[32];
+	struct {
 
-	struct wire_point_t* wire_point_drag_origin;
+		SDL_Rect          boxes   [MAX_NUM_BOXES];
+		struct text_t     texts   [MAX_NUM_TEXTS];
+		struct knob_t     knobs   [MAX_NUM_KNOBS];
+		struct wirept_t   outputs [MAX_NUM_OUTPUTS];
+		struct wirept_t   inputs  [MAX_NUM_INPUTS];
 
-	int num_texts;
-	int num_knobs;
-	int num_boxes;
-	int num_output_points;
+		u32 num_texts;
+		u32 num_knobs;
+		u32 num_boxes;
+		u32 num_outputs;
+		u32 num_inputs;
+
+		int  max_col;
+		int  max_row;
+
+		int frame_start_x;
+		int frame_start_y;
+
+		int pos_x;
+		int pos_y;
+
+	} gui;
 };
 
 
-
 #endif
+
+
+
+
+
+
+
+
+
+
+

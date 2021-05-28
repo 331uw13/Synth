@@ -17,8 +17,10 @@ struct state_t* synth_init(int freq, int samples) {
 		goto finish;
 	}
 
-	memset(s, 0, sizeof *s);
+	printf("state_t size = %li bytes\n", sizeof *s); // DELETE LATER.
 
+
+	// NOTE: create function to print SDL error?
 
 	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
 		fprintf(stderr, "ERROR: %s\n", SDL_GetError());
@@ -32,12 +34,16 @@ struct state_t* synth_init(int freq, int samples) {
 		goto finish;
 	}
 
-	s->font = TTF_OpenFont(FONT_FILE, 10);
+	if((s->font = TTF_OpenFont(FONT_FILE, 10)) == NULL) {
+		fprintf(stderr, "ERROR: While trying to open font: %s\n", SDL_GetError());
+		s->flags = NOT_INITIALIZED;
+		goto finish;
+	}
 
 	if((s->w = SDL_CreateWindow(WINDOW_TITLE, 
 					SDL_WINDOWPOS_CENTERED,
-				   	SDL_WINDOWPOS_CENTERED, 1200, 850,
-					SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE)) == NULL) {
+				   	SDL_WINDOWPOS_CENTERED, 1500, 850,
+					SDL_WINDOW_SHOWN)) == NULL) {
 	
 		fprintf(stderr, "ERROR: Failed to create new window! %s\n", SDL_GetError());
 		s->flags = NOT_INITIALIZED;
@@ -65,15 +71,23 @@ struct state_t* synth_init(int freq, int samples) {
 		goto finish;
 	}
 
+	SDL_GetWindowSize(s->w, &s->window_w, &s->window_h);
+	s->gui.max_col = s->window_w/GUI_CELL_WIDTH;
+	s->gui.max_row = s->window_h/GUI_CELL_HEIGHT;	
+
+	s->gui.pos_x = 0;
+	s->gui.pos_y = 0;
+
+	s->main_vol  = 0.2;
+	s->time      = 0.0;
+	s->time_pos  = 0.0;
+
+	s->seq.tempo    = 100.0;
+	s->seq.time     = 0.0;
+	s->focus_index  = -1;
+
+
 	SDL_PauseAudio(0);
-
-	s->main_vol = 0.2;
-	s->time = 0.0;
-	s->time_pos = 0.0;
-
-	s->seq.tempo = 100.0;
-	s->seq.time = 0.0;
-	s->focus_index = -1;
 
 
 finish:
@@ -84,12 +98,12 @@ finish:
 
 void synth_quit(struct state_t* s) {
 	
-	for(int i = 0; i < s->num_texts; i++) {
-		destroy_text(&s->texts[i]);
+	for(u32 i = 0; i < s->gui.num_texts; i++) {
+		destroy_text(&s->gui.texts[i]);
 	}
 
-	if(s->w != NULL) { SDL_DestroyWindow(s->w); }
-	if(s->r != NULL) { SDL_DestroyRenderer(s->r); }
+	if(s->w != NULL) { SDL_DestroyWindow(s->w);    }
+	if(s->r != NULL) { SDL_DestroyRenderer(s->r);  }
 	SDL_Quit();
 	free(s);
 
@@ -141,13 +155,14 @@ void oscillate(struct osc_t* osc, double time, double hz) {
 
 void audio_callback(void* userdata, u8* stream, int bytes) {
 	struct state_t* s = (struct state_t*)userdata;
+	if(bytes <= 0 || s == NULL) { return; }
+
 	short* buf = (short*)stream;
 	const u32 buf_len = bytes/sizeof* buf;
 
 	for(u32 i = 0; i < buf_len; i++) {
 
 		oscillate(&s->osc[0], s->time, 130.0);
-
 
 
 		buf[i] = (short)(clip(s->sound_output*s->main_vol, 1.0)*VOLUME_SCALE);
