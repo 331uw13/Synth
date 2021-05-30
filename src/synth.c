@@ -72,11 +72,6 @@ struct state_t* synth_init(int freq, int samples) {
 	}
 
 	SDL_GetWindowSize(s->w, &s->window_w, &s->window_h);
-	s->gui.max_col = s->window_w/GUI_CELL_WIDTH;
-	s->gui.max_row = s->window_h/GUI_CELL_HEIGHT;	
-
-	s->gui.pos_x = 0;
-	s->gui.pos_y = 0;
 
 	s->main_vol  = 0.2;
 	s->time      = 0.0;
@@ -86,6 +81,28 @@ struct state_t* synth_init(int freq, int samples) {
 	s->seq.time     = 0.0;
 	s->focus_index  = -1;
 
+	create_text(s, "in",  NULL);
+	create_text(s, "out", NULL);
+
+	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+		struct osc_t* osc = &s->osc[i];
+		osc->waveform = W_SINE;
+		osc->vol = 1.0;
+		osc->hz = 130.0;
+		osc->detune = 0.0;
+		osc->input = 0.0;
+		osc->output = NULL;
+	}
+
+	for(int i = 0; i < SYNTH_NUM_LFO; i++) {
+		struct lfo_t* lfo = &s->lfo[i];
+		lfo->waveform = W_SINE;
+		lfo->ampl = 0.0;
+		lfo->freq = 0.0;
+		lfo->hz = 100.0;
+		lfo->input = 0.0;
+		lfo->output = NULL;
+	}
 
 	SDL_PauseAudio(0);
 
@@ -115,40 +132,53 @@ double clip(double v, double max) {
 	return (v > 0.0 ? MIN(v, max) : MAX(v, -max));
 }
 
-void oscillate(struct osc_t* osc, double time, double hz) {
-	if(osc != NULL && osc->output != NULL) {
-		const double f = TO2PI(hz+osc->pitch)*time+osc->input;
+void synth_oscillate(int waveform, double input, double* output) {
+	switch(waveform) {
+	
+		case W_SINE:
+			*output = sin(input);
+			break;
 
-		switch(osc->waveform) {
-			
-			case W_SINE:
-				*osc->output = (sin(f));
-				break;
-			
-			case W_ABS_SINE:
-				*osc->output = fabs(sin(f-0.5));
-				break;
+		case W_ABS_SINE:
+			*output = fabs(sin(input-0.5));
+			break;
 
-			case W_SQUARE:
-				*osc->output = SIGN(sin(f))*0.5;
-				break;
+		case W_TRIANGLE:
+			*output = asin(sin(input));
+			break;
 
-			case W_TRIANGLE:
-				*osc->output = asin(sin(f));
-				break;
-			
-			case W_SAW:
-				for(double i = 1.0; i < 100.0; i+=1.0) {
-					*osc->output += sin(i*f)/i;
-				}
-				*osc->output *= 0.5;
-				break;
+		case W_SAW:
+			for(double i = 1.0; i <= 100.0; i += 1.0) {
+				*output += sin(i*input)/i;
+			}
+			*output *= 0.5;
+			break;
+		
+		case W_SQUARE:
+			*output = SIGN(sin(input))*0.5;
+			break;
 
-			default:
-				*osc->output = 0.0;
-				break;
-		}
+	
+		default: break;
+	}
+}
 
+void synth_lfo_update(struct lfo_t* lfo, double time) {
+	if(lfo->output != NULL) {
+		synth_oscillate(lfo->waveform, lfo->ampl*lfo->hz*sin(TO2PI(lfo->freq)*time+lfo->input), lfo->output);
+	}
+}
+
+void synth_osc_update(struct osc_t* osc, double time, double hz) {
+	if(osc->output != NULL) {
+		synth_oscillate(osc->waveform, TO2PI(hz+osc->detune)*time+osc->input, osc->output);
+		*osc->output *= osc->vol;
+	}
+}
+
+void synth_sequencer_update(struct state_t* s) {
+	if(s->seq.time >= (60.0/s->seq.tempo)/4.0) {
+		s->seq.time = 0.0;
 	}
 }
 
@@ -162,7 +192,13 @@ void audio_callback(void* userdata, u8* stream, int bytes) {
 
 	for(u32 i = 0; i < buf_len; i++) {
 
-		oscillate(&s->osc[0], s->time, 130.0);
+		for(int j = 0; j < SYNTH_NUM_LFO; j++) {
+			synth_lfo_update(&s->lfo[j], s->time);
+		}
+
+		for(int j = 0; j < SYNTH_NUM_OSC; j++) {
+			synth_osc_update(&s->osc[j], s->time, s->osc[j].hz);
+		}
 
 
 		buf[i] = (short)(clip(s->sound_output*s->main_vol, 1.0)*VOLUME_SCALE);
@@ -175,9 +211,7 @@ void audio_callback(void* userdata, u8* stream, int bytes) {
 	}
 
 
-
 }
-
 
 
 

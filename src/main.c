@@ -3,6 +3,7 @@
 // https://github.com/331uw13/Synth
 //
 
+
 #include "synth.h"
 
 #define GET_R(r) (r>>16)
@@ -69,6 +70,7 @@ void handle_event(struct state_t* s) {
 				if(event.button.button == SDL_BUTTON_RIGHT) {
 					s->flags |= MOUSE_RIGHT_DOWN;
 					s->flags &= ~DRAG_WIRE;
+					s->gui.wirept_drag = NULL;
 				}
 				else if(event.button.button == SDL_BUTTON_LEFT){
 					if(!(s->flags & MOUSE_LEFT_DOWN)) {
@@ -108,17 +110,65 @@ void render_text(struct state_t* s, struct text_t* t, int x, int y) {
 	}
 }
 
-void render_wire_point(struct state_t* s, u32 index) {
-	struct wirept_t* p = &s->gui.outputs[index];
+void render_wire_point(struct state_t* s, struct wirept_t* p) {
 	if(p->type != WIRE_TYPE_NONE) {
-		const u8 hover = AREA_OVERLAP(s->mouse_x, s->mouse_y, p->x-5, p->y-5, 20, 20);
-		
+		const u8 hover = AREA_OVERLAP(s->mouse_x, s->mouse_y, p->x-5, p->y-5, 40, 20);
+	
+		render_text(s, &s->gui.texts[p->type], p->x+15, p->y);
 		draw_point(s, p->x, p->y, 10, p->color);
-		
+
+		if(hover && (s->flags & MOUSE_LEFT_DOWN)) {
+			if(s->flags & DRAG_WIRE) {
+				if(!p->reserved && s->gui.wirept_drag != NULL) {
+					if(p->type != s->gui.wirept_drag->type && s->gui.wirept_drag->type != WIRE_TYPE_NONE) {
+						
+						p->link = s->gui.wirept_drag;
+						p->link->link = p;
+						p->reserved = p->link->reserved = 1;
+						p->color = p->link->color = WIREPT_RESERVED_COLOR;
+						
+						if(p->out_ptr != NULL && p->type == WIRE_TYPE_OUTPUT
+								&& p->link->type == WIRE_TYPE_INPUT) {
+							*p->out_ptr = p->link->in_ptr;
+						}
+						else if(p->link->out_ptr != NULL && p->type == WIRE_TYPE_INPUT
+								&& p->link->type == WIRE_TYPE_OUTPUT) {
+							*p->link->out_ptr = p->in_ptr;
+						}
+						
+						s->flags &= ~DRAG_WIRE;
+						//printf("\033[32mConnected!\033[0m\n");
+						
+					}
+				}
+			}
+			else {
+				if(!p->reserved) {
+					s->gui.wirept_drag = p;
+
+					s->flags |= DRAG_WIRE;
+					//printf("\033[33mStarted...\033[0m\n");
+				}
+				else {
+					p->color = p->link->color = WIREPT_FREE_COLOR;
+					p->reserved = p->link->reserved = 0;
+					if(p->out_ptr != NULL) {
+						*p->out_ptr = NULL;
+						*p->link->out_ptr = NULL;
+					}
+					//printf("\033[35mDisconnected!\033[0m\n");
+				}
+			}
+		}
+
+		if(p->reserved && (p->link != NULL && p->link->reserved)) {
+			draw_line(s, p->x+5, p->y+5, p->link->x+5, p->link->y+5, WIREPT_RESERVED_COLOR);
+		}
+
 	}
 }
 
-void render_knob(struct state_t* s, u32 index) {
+void render_knob(struct state_t* s, int index) {
 	struct knob_t* k = &s->gui.knobs[index];
 
 	const u8 hover = AREA_OVERLAP(
@@ -149,6 +199,7 @@ void render_knob(struct state_t* s, u32 index) {
 	const double min = int_data ? (double)k->min_i : k->min_d;
 	const double max = int_data ? (double)k->max_i : k->max_d;
 
+	// TODO: remove cx and cy.
 	const double cx = k->x+KNOB_RADIUS;
 	const double cy = k->y+KNOB_RADIUS;
 	const double norm = normalize(int_data ? *k->ptr_i : *k->ptr_d, min, max);
@@ -177,11 +228,11 @@ void render_knob(struct state_t* s, u32 index) {
 	draw_circle(s, k->x, k->y, KNOB_RADIUS, 16, col);
 	draw_line(s, x2, y2, x, y, k->color);
 	
-	render_text(s, k->text, cx-15, k->y+KNOB_RADIUS*2+k->text->rect.h/2);
-	
+	if(k->text != NULL) {
+		render_text(s, k->text, cx-k->text->rect.w/2, k->y+KNOB_RADIUS*2+k->text->rect.h/2);
+	}
+
 	// ---------------------
-	
-	//render_wire_point(s, &k->wire_point);
 
 	// Create half circle to rotate with line.
 
@@ -210,20 +261,7 @@ void render_knob(struct state_t* s, u32 index) {
 
 void render(struct state_t* s) {
 
-
-	
-	// DELETE LATER.
-	for(int i = 0; i < s->gui.max_row; i++) {
-		const int y = i*GUI_CELL_HEIGHT;
-		draw_line(s, 0, y, s->window_w, y, 0x303030);
-	}
-
-	// DELETE LATER.
-	for(int i = 0; i < s->gui.max_col; i++) {
-		const int x = i*GUI_CELL_WIDTH;
-		draw_line(s, x, 0, x, s->window_h, 0x303030);
-	}
-	
+	synth_sequencer_update(s);
 
 	set_color(s, 0x353535);
 	SDL_RenderFillRects(s->r, s->gui.boxes, s->gui.num_boxes);
@@ -233,18 +271,21 @@ void render(struct state_t* s) {
 	}
 	
 	for(u32 i = 0; i < s->gui.num_outputs; i++) {
-		render_wire_point(s, i);
+		render_wire_point(s, &s->gui.outputs[i]);
+	}
+	
+	for(u32 i = 0; i < s->gui.num_inputs; i++) {
+		render_wire_point(s, &s->gui.inputs[i]);
 	}
 
-	/*
+
 	if(s->flags & DRAG_WIRE) {
-		if(w != NULL) {
-			draw_line(s, w->x+5, w->y+5, s->mouse_x, s->mouse_y, w->color);
+		if(s->gui.wirept_drag != NULL) {
+			draw_line(s, s->gui.wirept_drag->x+5, s->gui.wirept_drag->y+5, 
+					s->mouse_x, s->mouse_y, 0xFFFFFF);
 		}
 	}
-	*/
 
-	//s->test_value = sin(s->time)*200.0+200.0;
 }
 
 
@@ -268,6 +309,7 @@ void main_loop(struct state_t* s) {
 			// Frame finished early.
 			SDL_Delay((min_dt-dt)*1000.0);
 		}
+
 	}
 }
 
@@ -276,24 +318,79 @@ void add_stuff(struct state_t* s) {
 	
 	//s->osc[0].output = &s->sound_output; // DELETE LATER.
 
-	const int def_color = 0x30A030;
+	const int def_color = 0x30AA30;
+	const int seq_color = 0x30AAEA;
 	const int osc_color = 0x20A0FF;
+	const int lfo_color = 0xE05020;
 
-	static double tests[10];
+
+	add_frame(s,  0, 0, 1, 2);
+	add_knob_d(s, 0, 0, "vol",  def_color, &s->main_vol, 0.0, 1.0);
+	add_input(s,  0, 1, &s->sound_output);
+
+
+	add_frame(s,  0, 2, 2, 9);
+	add_knob_d(s, 0, 2, "tempo", seq_color, &s->seq.tempo,      20.0, 200.0);
+	add_knob_d(s, 1, 2, "time",  seq_color, &s->seq.note_time,  0.0,  1.0);
+
 	
-	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
-		s->gui.pos_x = i;
-		begin_frame(s, "");
-		
-		add_knob_d(s, "vol",    osc_color, &s->osc[i].vol,    0.0, 50.0);
-		add_knob_d(s, "pitch",  osc_color, &s->osc[i].pitch,  0.0, 500.0);
-		add_knob_i(s, "wave",   osc_color, &s->osc[i].waveform, 0, NUM_WAVE_OPTIONS);
-		add_output(s, &tests[5]);
-		add_output(s, &tests[5]);
-
-		end_frame(s);
-		s->gui.pos_y = 0;
+	for(int i = 0; i < SYNTH_SEQ_PATTERN_LENGTH; i++) {
+		add_knob_i(s, 
+				i >= SYNTH_SEQ_PATTERN_LENGTH/2,
+			   	(i%8)+3, NULL, 0x707070, &s->seq.pattern[i], 0, 12);
 	}
+	
+
+
+
+
+
+
+
+
+	/*
+	s->gui.pos_x = 0;
+
+	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
+		s->gui.pos_y = 3;
+		begin_frame(s);
+
+		add_knob_d(s, "vol",    osc_color, &s->osc[i].vol,    0.0, 1.0);
+		add_knob_d(s, "hz",     osc_color, &s->osc[i].hz,     0.0, 500.0);
+		//add_knob_d(s, "detune", osc_color, &s->osc[i].detune, 0.0, 200.0);
+		add_knob_i(s, "wave",   osc_color, &s->osc[i].waveform, 0, NUM_WAVE_OPTIONS);
+		
+		add_input(s,  &s->osc[i].input);
+		add_output(s, &s->osc[i].output);
+		
+		s->gui.pos_x = i+1;
+		end_frame(s);
+	}
+
+
+	for(int i = 0; i < SYNTH_NUM_LFO; i++) {
+		s->gui.pos_y = 3;
+		begin_frame(s);
+
+		add_knob_d(s, "ampl",  lfo_color, &s->lfo[i].ampl,  0.0, 2.0);
+		add_knob_d(s, "freq",  lfo_color, &s->lfo[i].freq,  0.0, 10.0);
+		add_knob_d(s, "hz",    lfo_color, &s->lfo[i].hz,    0.0, 400.0);
+		add_knob_i(s, "wave",  lfo_color, &s->lfo[i].waveform, 0, NUM_WAVE_OPTIONS);
+		
+		add_input(s,  &s->lfo[i].input);
+		add_output(s, &s->lfo[i].output);
+
+		s->gui.pos_x = SYNTH_NUM_OSC+i+1;
+		end_frame(s);
+	}
+
+
+	s->gui.pos_y = 8;
+	s->gui.pos_x = 0;
+	begin_frame(s);
+	add_input(s, &s->sound_output);
+	end_frame(s);
+	*/
 
 }
 

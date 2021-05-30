@@ -14,60 +14,60 @@ typedef long unsigned int  u64;
 #define WINDOW_TITLE "Synthesizer! and learning about music..."
 
 
-#define MAX_NUM_BOXES  64
-#define MAX_NUM_TEXTS  64
+#define MAX_NUM_BOXES  15
+#define MAX_NUM_TEXTS  32
 #define MAX_NUM_KNOBS  32
 #define MAX_NUM_OUTPUTS 32
 #define MAX_NUM_INPUTS  32
 
 #define SYNTH_MAX_VOL 1.0
-#define SYNTH_NUM_OSC 3
+#define SYNTH_NUM_OSC 4
 #define SYNTH_NUM_ENV 3
 #define SYNTH_NUM_LFO 2
 
 #define KNOB_RADIUS 24.0
-#define SYNTH_SEQ_PATTERN_LENGTH 32
+#define SYNTH_SEQ_PATTERN_LENGTH 16
+
+#define WIREPT_RESERVED_COLOR  0x30FF30
+#define WIREPT_FREE_COLOR      0x707070
 
 #define GUI_ITEM_OFFSET  25
 #define GUI_FRAME_OFFSET 3
-#define GUI_CELL_HEIGHT  (KNOB_RADIUS*2+GUI_ITEM_OFFSET)
+
+// NOTE: rename to GUI_CELL_SIZE ?
+#define GUI_CELL_HEIGHT  (KNOB_RADIUS*2+GUI_ITEM_OFFSET)  
 #define GUI_CELL_WIDTH   (KNOB_RADIUS*2+GUI_ITEM_OFFSET)
 
-/*
-#define GUI_ITEM_X_SPACE  60
-#define GUI_ITEM_Y_SPACE  50
-#define GUI_ITEM_X_OFFSET (KNOB_RADIUS*2+30)
-#define GUI_ITEM_Y_OFFSET (KNOB_RADIUS*2+50)
-*/
+// 
 #define W_SINE      0
 #define W_ABS_SINE  1
-#define W_SQUARE    2
-#define W_TRIANGLE  3
-#define W_SAW       4
+#define W_TRIANGLE  2
+#define W_SAW       3
+#define W_SQUARE    4
 #define NUM_WAVE_OPTIONS 4
 
-#define WIRE_TYPE_NONE    0
-#define WIRE_TYPE_INPUT   1
-#define WIRE_TYPE_OUTPUT  2
+#define WIRE_TYPE_INPUT   0
+#define WIRE_TYPE_OUTPUT  1
+#define WIRE_TYPE_NONE    2
 
 #define DATA_TYPE_INT 0
 #define DATA_TYPE_DOUBLE 1
 #define VOLUME_SCALE (65536/SYNTH_NUM_OSC)
 
+// Some stuff i dont feel like writing again and again...
 #define MIN(a, b) (a <= b ? a : b)
 #define MAX(a, b) (a >= b ? a : b)
 #define SIGN(a) ((a > 0.0)-(a < 0.0))
-#define AREA_OVERLAP(xa,ya,xb,yb,w,h) ((xa >= xb && xa <= xb+w) && (ya >= yb && ya <= yb+h))
+#define AREA_OVERLAP(xa, ya, xb, yb, w, h) ((xa >= xb && xa <= xb+w) && (ya >= yb && ya <= yb+h))
 #define TO2PI(a) ((a)*M_PI*2.0)
 
-// "flags" for "struct state_t"
-#define NOT_INITIALIZED (1<<0)
-#define SHOULD_QUIT     (1<<1)
+
+// Flags for 'struct state_t'
+#define NOT_INITIALIZED   (1<<0)
+#define SHOULD_QUIT       (1<<1)
 #define MOUSE_LEFT_DOWN   (1<<2)
 #define MOUSE_RIGHT_DOWN  (1<<3)
-#define DRAG_WIRE         (1<<4)
-
-
+#define DRAG_WIRE         (1<<4)  // This is set if user clicked wire point.
 
 
 struct sequencer_t {
@@ -90,8 +90,9 @@ struct rand_seq_t {
 };
 
 struct osc_t {
-	double pitch;
 	double vol;
+	double hz;
+	double detune;
 	int    waveform;
 
 	double  input;
@@ -106,8 +107,13 @@ struct env_t {
 };
 
 struct lfo_t {
-	double freq;
 	double ampl;
+	double freq;
+	double hz;
+	int    waveform;
+
+	double  input;
+	double* output;
 };
 
 struct text_t {
@@ -118,8 +124,11 @@ struct text_t {
 struct wirept_t {
 	union {
 		double* in_ptr;
-		double* out_ptr;
+		double** out_ptr;
 	};
+
+	struct wirept_t* link;
+	u8  reserved;
 	int type;
 	int color;
 	int x;
@@ -163,11 +172,12 @@ struct state_t {
 	int window_h;
 
 	double test_value; // DELETE LATER.
+	double test_value2; // DELETE LATER.
 
 	double time;
 	double time_pos;
 	double main_vol;
-	double sound_output;
+	double sound_output;  // For example if you set output from oscillator to point here you can probably hear it.
 
 	struct sequencer_t seq;
 	
@@ -175,28 +185,22 @@ struct state_t {
 	struct env_t env[SYNTH_NUM_ENV];
 	struct lfo_t lfo[SYNTH_NUM_LFO];
 
-	struct {
 
+	struct {
+		
 		SDL_Rect          boxes   [MAX_NUM_BOXES];
 		struct text_t     texts   [MAX_NUM_TEXTS];
 		struct knob_t     knobs   [MAX_NUM_KNOBS];
 		struct wirept_t   outputs [MAX_NUM_OUTPUTS];
 		struct wirept_t   inputs  [MAX_NUM_INPUTS];
-
+		
+		u32 num_boxes;
 		u32 num_texts;
 		u32 num_knobs;
-		u32 num_boxes;
 		u32 num_outputs;
 		u32 num_inputs;
 
-		int  max_col;
-		int  max_row;
-
-		int frame_start_x;
-		int frame_start_y;
-
-		int pos_x;
-		int pos_y;
+		struct wirept_t*  wirept_drag;
 
 	} gui;
 };
