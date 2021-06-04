@@ -1,11 +1,8 @@
-
-// https://github.com/331uw13/ggui
-
 #ifndef GGUI_H
 #define GGUI_H
 
-#define GGUI_MOUSE_DOWN (1<<0)
-
+#define GGUI_MOUSE_DOWN       (1<<0)
+#define GGUI_MOUSE_HOLD_DOWN  (1<<1)
 
 struct ggui {
 	double mouse_x;

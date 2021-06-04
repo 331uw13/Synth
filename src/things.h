@@ -1,10 +1,9 @@
 #ifndef THINGS_H
 #define THINGS_H
 
+#include <math.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
-#include <GL/glu.h>
-
 #include "ggui/ggui.h"
 
 

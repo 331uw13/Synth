@@ -89,16 +89,10 @@ GGUI_SHADER_HEADER
 	"vec3 circle_col = circle*vec3(0.1, 0.8, 0.1);"
 
 	"out_color = vec4(line_col+circle_col, line+circle);"
-
 "}"
 ;
 
 
 
+
 #endif
-
-
-
-
-
-

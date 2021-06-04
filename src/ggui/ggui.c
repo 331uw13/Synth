@@ -17,8 +17,8 @@
 
 
 
-static int   _render_clicked (struct ggui* g, double x, double y, double w, double h, 
-		int program, double value);
+static void   _render(struct ggui* g, double x, double y, double w, double h, int program, double value);
+static int    _area_hovered(struct ggui* g, double x, double y, double w, double h);
 static double _normalize (double t, double min, double max);
 static double _lerp      (double t, double min, double max);
 static double _map       (double t, double s_min, double s_max, double d_min, double d_max);
@@ -44,12 +44,12 @@ struct ggui* ggui_init() {
 
 	tmp[1] = compile_shader(GGUI_CHECKBOX_SHADER, GL_FRAGMENT_SHADER);
 	g->programs[CHECKBOX_INDEX] = create_program(tmp, 2);
-	
+	glDeleteShader(tmp[1]);
+
 	tmp[1] = compile_shader(GGUI_KNOB_SHADER, GL_FRAGMENT_SHADER);
 	g->programs[KNOB_INDEX] = create_program(tmp, 2);
+	glDeleteShader(tmp[1]);
 
-
-	// TODO: delete shaders.
 
 finish:
 	return g;
@@ -58,9 +58,11 @@ finish:
 
 void ggui_quit(struct ggui* g) {
 	if(g != NULL) {
-		
-		// TODO: delete programs.
-
+		for(unsigned int i = 0; i < (sizeof g->programs / sizeof *g->programs); i++) {
+			if(g->programs[i] > 0) {
+				glDeleteProgram(g->programs[i]);
+			}	
+		}
 		free(g);
 	}
 }
@@ -68,7 +70,8 @@ void ggui_quit(struct ggui* g) {
 int ggui_checkbox(struct ggui* g, double x, double y, int* ptr) {
 	int used = 0;
 	if(ptr != NULL) {
-		if(_render_clicked(g, x, y, 30, 30, g->programs[CHECKBOX_INDEX], (double)*ptr)) {
+		_render(g, x, y, 30, 30, g->programs[CHECKBOX_INDEX], (double)*ptr);
+		if(_area_hovered(g, x, y, 30, 30) && (g->flags & GGUI_MOUSE_DOWN)) {
 			*ptr = !*ptr;
 			used = 1;
 		}
@@ -80,7 +83,9 @@ int ggui_checkbox(struct ggui* g, double x, double y, int* ptr) {
 int ggui_knob(struct ggui* g, double x, double y, double* ptr, double max, double min) {
 	int used = 0;
 	if(ptr != NULL) {
-		if(_render_clicked(g, x, y, 55, 55, g->programs[KNOB_INDEX], *ptr)) {
+		_render(g, x, y, 55, 55, g->programs[KNOB_INDEX], *ptr);
+		
+		if(_area_hovered(g, x, y, 55, 55) && (g->flags & GGUI_MOUSE_HOLD_DOWN)) {
 			double p = M_PI/4.0;
 			double a = M_PI+atan2(g->mouse_x-x, y-g->mouse_y);
 			a = MAX(p, MIN(2.0*M_PI-p, a));
@@ -94,33 +99,23 @@ int ggui_knob(struct ggui* g, double x, double y, double* ptr, double max, doubl
 
 
 
+int _area_hovered(struct ggui* g, double x, double y, double w, double h) {
+	return (g->mouse_x >= x-w/2 && g->mouse_x <= (x-w/2)+w 
+			&& g->mouse_y >= y-h/2 && g->mouse_y <= (y-h/2)+h);
+}
 
-
-
-int _render_clicked(struct ggui* g, double x, double y, double w, double h, 
-		int program, double value) {
+void _render(struct ggui* g, double x, double y, double w, double h, int program, double value) {
 
 	glUseProgram(program);
 
 	// TODO: optimize later.
-	
-	const int hover = (
-			g->mouse_x >= x-w/2     &&
-			g->mouse_x <= (x-w/2)+w &&
-			g->mouse_y >= y-h/2     &&
-			g->mouse_y <= (y-h/2)+h);
-
-	const int clicked = (hover && (g->flags & GGUI_MOUSE_DOWN));
 
 	glUniform2f(glGetUniformLocation(program, "pos"),  x, y);
 	glUniform2f(glGetUniformLocation(program, "size"), w, h);
 	glUniform2f(glGetUniformLocation(program, "win_size"), g->win_w, g->win_h);
 	glUniform2f(glGetUniformLocation(program, "mouse"), g->mouse_x, g->mouse_y);
 	glUniform1f(glGetUniformLocation(program, "value"), value);
-	//glUniform1f(glGetUniformLocation(program, "hover"), hover ? 1.0 : 0.0);
-	//glUniform1f(glGetUniformLocation(program, "click"), clicked ? 1.0 : 0.0);
-	//glUniform1f(glGetUniformLocation(program, "time"), glfwGetTime());
-
+	
 	x = _map(x, 0.0, g->win_w,  -1.0,  1.0);
 	y = _map(y, 0.0, g->win_h,   1.0, -1.0);
 	w = _map(w, 0.0, g->win_w,   0.0,  1.0);
@@ -133,9 +128,7 @@ int _render_clicked(struct ggui* g, double x, double y, double w, double h,
 	glVertex2f(x+w,   y+h);
 	glEnd();
 
-	return clicked;
 }
-
 
 double _normalize(double t, double min, double max) {
 	return (t-min)/(max-min);
@@ -148,5 +141,4 @@ double _lerp(double t, double min, double max) {
 double _map(double t, double s_min, double s_max, double d_min, double d_max) {
 	return _lerp(_normalize(t, s_min, s_max), d_min, d_max);
 }
-
 

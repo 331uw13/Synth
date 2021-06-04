@@ -25,6 +25,9 @@ struct state_t*  synth_init() {
 	s->w = NULL;
 	s->gui = NULL;
 
+	glfwInitHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwInitHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwInitHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
 	
 	if(!glfwInit()) {
 		fprintf(stderr, "ERROR: Failed to initialize glfw!\n");
@@ -41,6 +44,7 @@ struct state_t*  synth_init() {
 	}
 
 	glfwMakeContextCurrent(s->w);
+	glfwSwapInterval(1);
 
 	if(glewInit()) {
 		fprintf(stderr, "ERROR: Failed to initialize glew!\n");
@@ -86,9 +90,11 @@ void glfw_mouse_button_callback(GLFWwindow* w, int button, int act, int mods) {
 
 	if(act == GLFW_PRESS) {
 		g->flags |= GGUI_MOUSE_DOWN;
+		g->flags |= GGUI_MOUSE_HOLD_DOWN;
 	}
 	else if(act == GLFW_RELEASE) {
 		g->flags &= ~GGUI_MOUSE_DOWN;
+		g->flags &= ~GGUI_MOUSE_HOLD_DOWN;
 	}
 
 }
