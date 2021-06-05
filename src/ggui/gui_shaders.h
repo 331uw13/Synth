@@ -70,12 +70,12 @@ GGUI_SHADER_HEADER
 	"vec2 m = (vec2(mouse.x, pos.y)-vec2(pos.x, mouse.y))/size;" 
 
 	"float min_val = 0.0;"
-	"float max_val = 5.0;"
+	"float max_val = 400.0;"
 
 	"float n = (value-min_val)/(max_val-min_val);"
 	"float p = PI/4.0;"
 	"float a = (PI-p)*n*2.0+p;"
-	"float x = sin(a)*0.4;"
+	"float x =  sin(a)*0.4;"
 	"float y = -cos(a)*0.4;"
 
 	"vec2 d = vec2(x, y);"
