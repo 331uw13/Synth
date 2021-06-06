@@ -64,7 +64,7 @@ GGUI_SHADER_HEADER
 		"vec4 fd = font_data[str[i]-32];"
 		"vec2 uv2 = uv;"
 		"uv2.x += fd.x-cur;"
-		"uv2.y += fd.y;"
+		"uv2.y += fd.y+(fd.w-fd.y)-0.5;"
 		
 		"float t = texture(texture0, uv2).r;"
 
