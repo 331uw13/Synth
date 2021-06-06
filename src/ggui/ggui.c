@@ -5,7 +5,7 @@
 #include "shader.h"
 #include "gui_shaders.h"
 
-#include "stb_font_consolas_49_usascii.inl"
+#include "stb_font_consolas_49_usascii.h"
 
 #include <GL/gl.h>
 #include <math.h>
