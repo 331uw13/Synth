@@ -86,8 +86,9 @@ struct state_t*  synth_init() {
 	for(int i = 0; i < SYNTH_NUM_OSC; i++) {
 		struct osc_t* o = &s->synth.osc[i];
 		o->volume = 0.5;
-		o->tune = 130.0;
 		o->waveform = W_SINE;
+		o->tune = 130.0;
+		o->detail = 50.0;
 	}
 
 	s->synth.time = 0.0;
@@ -108,7 +109,8 @@ struct state_t*  synth_init() {
 		goto finish;
 	}
 
-	SDL_PauseAudio(0);
+	
+	//SDL_PauseAudio(0);
 
 
 
@@ -131,7 +133,7 @@ void synth_quit(struct state_t* s) {
 }
 
 
-double synth_oscillate(int waveform_type, double input) {
+double synth_oscillate(int waveform_type, double input, double detail) {
 	double out = 0.0;
 	switch(waveform_type) {
 		case W_SINE:
@@ -143,8 +145,15 @@ double synth_oscillate(int waveform_type, double input) {
 			break;
 		
 		case W_SAW:
-			for(double i = 1.0; i <= 100.0; i += 1.0) {
-				out = sin(i*input)/i;
+			for(double i = 1.0; i <= detail; i += 1.0) {
+				out += sin(i*input)/i;
+			}
+			out *= 0.5;
+			break;
+
+		case W_REVERSE_SAW:
+			for(double i = 1.0; i <= detail; i += 1.0) {
+				out += sin(i*input-i)/i;
 			}
 			out *= 0.5;
 			break;
@@ -159,7 +168,8 @@ double synth_oscillate(int waveform_type, double input) {
 }
 
 double synth_osc_update(struct osc_t* osc, double time) {
-	return synth_oscillate(osc->waveform, sin(TO2PI(osc->tune)*time));
+	return synth_oscillate(osc->waveform, 
+			sin(TO2PI(osc->tune)*time), osc->detail)*osc->volume;
 }
 
 double synth_lfo_update(struct lfo_t* osc, double time) {

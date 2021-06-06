@@ -27,16 +27,18 @@ typedef long unsigned int  u64;
 #define SYNTH_NUM_ENV 4
 #define SYNTH_NUM_WAVE_OPTIONS 4
 
-#define W_SINE      0
-#define W_TRIANGLE  1
-#define W_SAW       2
-#define W_SQUARE    3
+#define W_SINE         0
+#define W_TRIANGLE     1
+#define W_SAW          2
+#define W_REVERSE_SAW  3
+#define W_SQUARE       4
 
 
 
 struct osc_t {
 	double volume;
 	double tune;
+	double detail;
 	int waveform;
 };
 
