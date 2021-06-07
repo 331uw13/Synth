@@ -87,8 +87,9 @@ struct state_t*  synth_init() {
 		struct osc_t* o = &s->synth.osc[i];
 		o->volume = 0.5;
 		o->waveform = W_SINE;
-		o->tune = 130.0;
-		o->detail = 50.0;
+		o->tone = 130.0;
+		o->saw_detail = 50.0;
+		o->in_use = 0;
 	}
 
 	s->synth.time = 0.0;
@@ -109,8 +110,7 @@ struct state_t*  synth_init() {
 		goto finish;
 	}
 
-	
-	//SDL_PauseAudio(0);
+	SDL_PauseAudio(0);
 
 
 
@@ -169,7 +169,7 @@ double synth_oscillate(int waveform_type, double input, double detail) {
 
 double synth_osc_update(struct osc_t* osc, double time) {
 	return synth_oscillate(osc->waveform, 
-			sin(TO2PI(osc->tune)*time), osc->detail)*osc->volume;
+			sin(TO2PI(osc->tone)*time), osc->saw_detail)*osc->volume;
 }
 
 double synth_lfo_update(struct lfo_t* osc, double time) {
@@ -187,9 +187,14 @@ void sdl_audio_callback(void* userdata, u8* stream, int bytes) {
 
 		for(u32 i = 0; i < buf_len; i++) {
 			double out = 0.0;
-			out = synth_osc_update(&synth->osc[0], synth->time);
 
-			buf[i] = (short)(out*8000.0);
+			for(int o = 0; o < SYNTH_NUM_OSC; o++) {
+				if(synth->osc[o].in_use) {
+					out += synth_osc_update(&synth->osc[o], synth->time);
+				}
+			}
+
+			buf[i] = (short)(out*5000.0);
 
 			synth->time_pos += 1.0;
 			synth->time = synth->time_pos/(double)synth->audio.freq;

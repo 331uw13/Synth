@@ -12,8 +12,8 @@
 
 
 #define FONT_INDEX      0
-#define CHECKBOX_INDEX  1
-#define BUTTON_INDEX    2
+#define BUTTON_INDEX    1
+#define CHECKBOX_INDEX  2
 #define KNOB_INDEX      3
 
 #define MIN(a, b) ((a < b) ? a : b)
@@ -78,27 +78,29 @@ struct ggui* ggui_init() {
 	glDeleteShader(tmp[1]);
 
 
-	// Using uniform buffer to store characters position, width and height.
+	// Using uniform buffer to store font data.
 	
-	const u32 num_chars = STB_SOMEFONT_NUM_CHARS;
+	const u32 num_chars = STB_SOMEFONT_NUM_CHARS-STB_SOMEFONT_FIRST_CHAR;
 	const u32 ubo_size = num_chars*(sizeof(float)*4); 
-	
+
 	printf("%i\n", num_chars);
 
 	glGenBuffers(1, &g->font_data_ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, g->font_data_ubo);
 	glBufferData(GL_UNIFORM_BUFFER, ubo_size, NULL, GL_STATIC_DRAW);
 
-	void* ubo_ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_READ_WRITE);
+	void* ubo_ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	
 	if(ubo_ptr != NULL) {
 		const u32 vec4_size = sizeof(float)*4;
 		for(u32 i = 0; i < num_chars; i++) {
-			memmove(ubo_ptr+(i*vec4_size), &font_data[i].s0f, vec4_size);
+			memmove(ubo_ptr+(i*vec4_size), &font_data[i+STB_SOMEFONT_FIRST_CHAR].s0f, vec4_size);
 		}
 	}
 	else {
 		fprintf(stderr, "ggui(ERROR): Failed to map uniform buffer to store font data.\n");
 	}
+
 
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 	glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->font_data_ubo, 0, ubo_size);
@@ -106,7 +108,10 @@ struct ggui* ggui_init() {
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 
-
+	// Create shader for buttons.
+	tmp[1] = compile_shader(GGUI_BUTTON_SHADER, GL_FRAGMENT_SHADER);
+	g->programs[BUTTON_INDEX] = create_program(tmp, 2);
+	glDeleteShader(tmp[1]);
 
 	// Create shader for checkboxes.
 	tmp[1] = compile_shader(GGUI_CHECKBOX_SHADER, GL_FRAGMENT_SHADER);
@@ -125,29 +130,31 @@ finish:
 	return g;
 }
 
-void ggui_text(struct ggui* g, double x, double y, char* text) {
-	
+void ggui_text(struct ggui* g, double x, double y, double width, char* text) {
+
+	// TODO: Optimize later.
 
 	const int program = g->programs[FONT_INDEX];
-
-		
 	glUseProgram(program);
+
+	int buf[16];
+	int len = 0;
+
+	while(*text) {
+		len++;
+		buf[len] = (int)*text++;
+	}
 	
+	buf[0] = len;
+
+
+	glUniform1iv(glGetUniformLocation(program, "str"), len+1, buf);
+	glUniform1f(glGetUniformLocation(program, "width"), width);
+
 	glBindTexture(GL_TEXTURE_2D, g->font_texture);
 	glActiveTexture(GL_TEXTURE0);
-	
 
-	/*
-	stb_fontchar* cd = &font_data['A'-STB_SOMEFONT_FIRST_CHAR];
-	
-	glUniform4f(glGetUniformLocation(program, "glyph_pos"),
-		   	cd->s0f, cd->t0f,
-			cd->s1f, cd->t1f);
-	*/
-
-	_render(g, x, y, 500, 500, 0.0, program);
-
-
+	_render(g, x, y, width, 20.0, 0.0, program);
 
 
 
@@ -209,7 +216,15 @@ void ggui_quit(struct ggui* g) {
 	}
 }
 
-int ggui_checkbox(struct ggui* g, double x, double y, int* ptr) {
+int ggui_button(struct ggui* g, double x, double y, int always_color) {
+	const int used = (_area_hovered(g, x, y, 30, 30) && (g->flags & GGUI_MOUSE_DOWN));
+	const int program = g->programs[BUTTON_INDEX];
+	glUseProgram(program);
+	_render(g, x, y, 30, 30, (double)(used || always_color), program);
+	return used;
+}
+
+int ggui_checkbox(struct ggui* g, double x, double y, unsigned char* ptr) {
 	int used = 0;
 	if(ptr != NULL) {
 		const int program = g->programs[CHECKBOX_INDEX];
@@ -274,7 +289,6 @@ int _area_hovered(struct ggui* g, double x, double y, double w, double h) {
 }
 
 void _render(struct ggui* g, double x, double y, double w, double h, double value, int program) {
-
 	// TODO: optimize later.
 
 	glUniform2f(glGetUniformLocation(program, "pos"),  x, y);

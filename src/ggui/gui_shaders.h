@@ -34,38 +34,38 @@ GGUI_GLSL_VERSION "\n"     \
 static const char* const GGUI_FONT_SHADER = 
 GGUI_SHADER_HEADER
 
+// TODO: make this better...
+
 "\n"
-"#define NUM_CHARS 95"
+"#define NUM_CHARS 63"
 "\n"
 
 "uniform sampler2D texture0;"
+"uniform int str[16];"
+"uniform float width;"
 
 "\n"
 "layout(std140) uniform ubo__font_data {\n"
 	"vec4 font_data[NUM_CHARS];"
 "};"
 
-"void main() {"
 
+"void main() {"
+	"if(str[0] > 15) { discard; }"
 	"vec2 uv = getuv()+0.5;"
 	"uv.y = 1.0-uv.y;"
 
-	"int str[6];"
-	"str[0] = 'h';"
-	"str[1] = 'e';"
-	"str[2] = 'l';"
-	"str[3] = 'l';"
-	"str[4] = 'o';"
-	
+	"uv.y *= 0.28;"
+	"uv.x *= (width*0.0091);"
+
 	"float cur = 0;"
 	"float result = 0.0;"
 	
-	"for(int i = 0; i < 5; i++) {"
-		"vec4 fd = font_data[str[i]-32];"
+	"for(int i = 0; i < str[0]; i++) {"
+		"vec4 fd = font_data[str[i+1]-64];"
 		"vec2 uv2 = uv;"
 		"uv2.x += fd.x-cur;"
-		"uv2.y += fd.y+(fd.w-fd.y)-0.5;"
-		
+		"uv2.y += fd.y+(fd.w-fd.y)-0.18;"
 		"float t = texture(texture0, uv2).r;"
 
 		"t *= step(fd.x, uv2.x)*step(uv2.x, fd.z);"
@@ -75,14 +75,30 @@ GGUI_SHADER_HEADER
 		"result += t;"
 	"}"
 
-
-
-	"out_color = vec4(vec3(result), 1.0);"
-
+	"result = pow(result, 0.1);"
+	"out_color = vec4(vec3(result), result*0.8);"
 "}"
 ;
 
 
+
+
+static const char* const GGUI_BUTTON_SHADER = 
+GGUI_SHADER_HEADER
+
+"#define E0  vec2(0.3) \n"
+"#define E1  vec2(0.2) \n"
+
+"void main() {"
+	"vec2 uv = getuv();"
+	
+	"vec2 d0 = smoothstep(0.1, 0.2, uv-0.25);"
+	"vec2 d1 = smoothstep(0.2, 0.1, uv+0.55);"
+	"float box = d0.x+d0.y+d1.x+d1.y;"
+
+	"out_color = vec4(vec3(0.4,value+0.28,value+0.4), 1.0-box);"
+"}"
+;
 
 
 static const char* const GGUI_CHECKBOX_SHADER = 
@@ -96,7 +112,7 @@ GGUI_SHADER_HEADER
 	"float l = value*0.1;"
 	"float d = smoothstep(E0, E1-l, length(uv)-0.2-l*0.3);"
 
-	"out_color = vec4(vec3(0.3, value+0.3, 0.3), d);"
+	"out_color = vec4(vec3(value+0.45, value*0.3+0.3, value+0.45), d);"
 "}"
 ;
 
@@ -106,7 +122,7 @@ static const char* const GGUI_KNOB_SHADER =
 GGUI_SHADER_HEADER
 
 "#define E0  0.3 \n"
-"#define E1  0.2 \n"
+"#define E1  0.1 \n"
 "#define S smoothstep\n"
 
 "uniform vec2 limits;"
@@ -132,11 +148,11 @@ GGUI_SHADER_HEADER
 
 	"float line = create_line(d*0.35, d, uv);"
 	
-	"float l = length(uv*0.8);"
-	"float circle  = 1.0-abs(S(0.3, 0.4, l)-S(0.41, 0.3, l));"
+	"float l = length(uv*0.9);"
+	"float circle  = 1.0-abs(S(0.25, 0.4, l)-S(0.45, 0.3, l));"
 
 	"vec3 line_col = line*vec3(0.8);"
-	"vec3 circle_col = circle*vec3(0.1, 0.8, 0.1);"
+	"vec3 circle_col = circle*vec3(0.88, 0.4, 0.58);"
 
 	"out_color = vec4(line_col+circle_col, line+circle);"
 "}"

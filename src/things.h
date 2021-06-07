@@ -22,7 +22,7 @@ typedef long unsigned int  u64;
 #define TO2PI(a) ((a)*M_PI*2.0)
 #define SIGN(a) ((a > 0)-(a < 0))
 
-#define SYNTH_NUM_OSC 5
+#define SYNTH_NUM_OSC 3
 #define SYNTH_NUM_LFO 3
 #define SYNTH_NUM_ENV 4
 #define SYNTH_NUM_WAVE_OPTIONS 4
@@ -36,9 +36,10 @@ typedef long unsigned int  u64;
 
 
 struct osc_t {
+	u8     in_use;
 	double volume;
-	double tune;
-	double detail;
+	double tone;
+	double saw_detail;
 	int waveform;
 };
 
